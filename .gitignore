@@ -1,0 +1,27 @@
+# dependencies and build output
+node_modules/
+bin/
+obj/
+dist/
+coverage/
+artifacts/
+*.tsbuildinfo
+*.log
+
+# local config and secrets
+.env*
+!.env.example
+appsettings.local.json
+*.pem
+
+# editors and OS
+.vs/
+.idea/
+.vscode/
+*.user
+TestResults/
+.DS_Store
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
