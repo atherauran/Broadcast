@@ -1,5 +1,7 @@
 using Broadcast.Core;
 using System.Collections.Concurrent;
+using System.Net.Http.Json;
+using System.Text.Json;
 
 var tests = new (string Name, Func<Task> Run)[]
 {
@@ -70,17 +72,22 @@ static async Task RealtimeSmoke()
             new AuthUser("20000000-0000-4000-8000-000000000001", [])));
     using var life = new CancellationTokenSource(TimeSpan.FromSeconds(20));
     var changes = 0; var beats = 0;
+    // 50 ms keepalives: the status heartbeat fires every 6th and the missed-broadcast check every 2nd.
     try
     {
-        await new RealtimeConnection(backend).RunAsync(() => changes++, async ct =>
+        await new RealtimeConnection(backend, TimeSpan.FromMilliseconds(50)).RunAsync(() => changes++, async ct =>
         {
             var result = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, ct);
             Check(result.Active && result.ClassroomId == "8-1");
-            if (++beats == 2) life.Cancel();
+            if (++beats == 3) life.Cancel();
         }, life.Token);
     }
-    catch (OperationCanceledException) when (beats == 2) { }
-    Check(beats == 2 && changes >= 2, "Subscription/heartbeat did not confirm readiness");
+    catch (OperationCanceledException) when (beats == 3) { }
+    // beats: 1 on join + 1 per 6 keepalives; changes: 1 on join + 1 per 2 keepalives.
+    Check(beats == 3 && changes >= 1 + 3 * (beats - 1), "Subscription/heartbeat did not confirm readiness");
+    using var http = new HttpClient();
+    var stats = await http.GetFromJsonAsync<JsonElement>("http://127.0.0.1:54329/stats");
+    Check(stats.GetProperty("keepalives").GetInt32() >= 12, "Keepalives were not sent on the fast cycle");
 }
 
 static void Check(bool condition, string message = "Assertion failed") { if (!condition) throw new Exception(message); }

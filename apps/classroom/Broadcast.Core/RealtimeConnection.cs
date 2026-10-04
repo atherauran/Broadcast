@@ -5,8 +5,13 @@ using System.Text.Json;
 namespace Broadcast.Core;
 
 // Supabase's documented Phoenix v1 JSON protocol; no Broadcast or Presence messages are accepted.
-public sealed class RealtimeConnection(BackendClient backend)
+public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAlive = null)
 {
+    // Supabase closes a socket that goes 25 seconds without a Phoenix heartbeat. The ping is a tiny frame with no database work.
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(20);
+    private const int RecheckEvery = 2;   // every 40 seconds, so a missed notification is recovered while a 30-second broadcast may still be valid
+    private const int StatusEvery = 6;    // every 120 seconds
+
     public async Task RunAsync(Action changed, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct)
     {
         using var life = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -35,7 +40,7 @@ public sealed class RealtimeConnection(BackendClient backend)
             var sequence = 0;
             while (!ct.IsCancellationRequested)
             {
-                var delay = Task.Delay(TimeSpan.FromSeconds(60), ct);
+                var delay = Task.Delay(keepAlive ?? KeepAliveInterval, ct);
                 if (await Task.WhenAny(receiveTask, delay) == receiveTask) { await receiveTask; throw new IOException("实时连接已关闭"); }
                 await delay;
                 var currentToken = await backend.AccessTokenAsync(ct);
@@ -48,8 +53,8 @@ public sealed class RealtimeConnection(BackendClient backend)
                 heartbeatAck = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                 await SendAsync("phoenix", "heartbeat", heartbeatRef, new { });
                 await heartbeatAck.Task.WaitAsync(TimeSpan.FromSeconds(8), ct);
-                await liveHeartbeat(ct);
-                changed();
+                if (sequence % StatusEvery == 0) await liveHeartbeat(ct);
+                if (sequence % RecheckEvery == 0) changed();
             }
         }
         finally

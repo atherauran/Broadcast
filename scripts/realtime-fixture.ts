@@ -1,6 +1,6 @@
 // Local protocol fixture only. It does not connect to a Supabase project.
 const device = '20000000-0000-4000-8000-000000000001';
-let heartbeats = 0;
+let heartbeats = 0, keepalives = 0;
 Deno.serve({ hostname: '127.0.0.1', port: 54329 }, async request => {
   const url = new URL(request.url);
   if (url.pathname === '/realtime/v1/websocket') {
@@ -16,7 +16,7 @@ Deno.serve({ hostname: '127.0.0.1', port: 54329 }, async request => {
         reply('system', { extension: 'postgres_changes', status: 'ok', message: 'Subscribed to PostgreSQL' });
         reply('postgres_changes', { ids: [1], data: { type: 'INSERT', record: {} } });
       }
-      if (input.event === 'heartbeat') reply('phx_reply', { status: 'ok', response: {} });
+      if (input.event === 'heartbeat') { keepalives++; reply('phx_reply', { status: 'ok', response: {} }); }
     };
     return response;
   }
@@ -34,6 +34,6 @@ Deno.serve({ hostname: '127.0.0.1', port: 54329 }, async request => {
     }
     return Response.json({ access_token: 'rotated-token', refresh_token: 'rotated-refresh', expires_in: 3600, user: { id: device, app_metadata: { role: 'device' } } });
   }
-  if (url.pathname === '/stats') return Response.json({ heartbeats });
+  if (url.pathname === '/stats') return Response.json({ heartbeats, keepalives });
   return new Response('Not found', { status: 404 });
 });

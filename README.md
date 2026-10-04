@@ -54,7 +54,7 @@ Logging in and sending broadcasts also requires the shared admin password from t
 
 - Teachers log in with their name and the shared admin password. The name is saved and shown with each broadcast; it is stored only in the current browser, not in the shared admin account.
 - A classroom's first binding requires admin verification, after which it uses its own device identity. Class occupancy is enforced by a database transaction and a unique constraint.
-- While the Realtime subscription and heartbeat are healthy, a device reports every 60 seconds. The server treats a classroom as offline after 140 seconds without a valid heartbeat. If the teacher app itself is offline, status shows as unconfirmed.
+- While the Realtime subscription and heartbeat are healthy, a device reports its status every 120 seconds, and sends a lightweight Realtime keepalive every 20 seconds. The server treats a classroom as offline after 270 seconds without a valid heartbeat. If the teacher app itself is offline, status shows as unconfirmed.
 - A broadcast is at most 300 Unicode characters and is valid for 30 seconds from its server-side creation time. Waiting for speech synthesis does not count against this.
 - Common broadcast templates appear below the input box. Templates with blanks open a dialog to fill them in, then replace the input text.
 - Classrooms play in FIFO order. A broadcast that hasn't started after 30 seconds is skipped; one that has started plays to the end. The server records started deliveries atomically, so a client restart never replays them.

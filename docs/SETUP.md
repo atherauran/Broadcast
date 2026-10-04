@@ -5,7 +5,7 @@ The production Supabase project `kmuuixuiipqxzeyoawap` already has its database,
 ## Supabase
 
 1. Create a Supabase project and note the project URL and publishable/anon key. Clients use only the public key; never put the service_role key in them. The current URL is `https://kmuuixuiipqxzeyoawap.supabase.co`.
-2. Link the project with the Supabase CLI and apply every SQL file in `supabase/migrations` in filename order. `202609120001_broadcast_options.sql` adds the teacher name, repeat count, close mode, emotion and voice fields, and updates the send and pending queries.
+2. Link the project with the Supabase CLI and apply every SQL file in `supabase/migrations` in filename order. `202609120001_broadcast_options.sql` adds the teacher name, repeat count, close mode, emotion and voice fields, and updates the send and pending queries. `202610040001_heartbeat_120s.sql` changes the offline threshold to 270 seconds.
 3. Keep Auth self-signup disabled. Create one email/password user such as `admin@broadcast.local`, confirm the email, and set `app_metadata.role` to `admin` through the trusted Admin API. Use **app_metadata**, never the user-writable user_metadata. The admin email in the teacher and classroom apps must match.
 4. Deploy the `broadcast-api` Edge Function. `supabase/config.toml` sets `verify_jwt=false` for it, but the function calls `auth.getUser(token)` on every request and checks admin or device permissions, so do not remove that check.
 5. The only function secret needed is `ALLOWED_ORIGINS`. The teacher app's five preview audio clips ship with the static site, so Supabase holds no Tencent Cloud credentials.
