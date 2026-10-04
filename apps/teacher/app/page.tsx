@@ -37,7 +37,6 @@ export default function App() {
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState('');
   const [live, setLive] = useState(false);
   const [network, setNetwork] = useState(navigator.onLine);
@@ -120,7 +119,6 @@ export default function App() {
         setLive(status === 'SUBSCRIBED');
         if (status === 'SUBSCRIBED') void load();
       });
-    void load();
     const resume = () => { if (document.visibilityState === 'visible') void load(); };
     document.addEventListener('visibilitychange', resume);
     return () => { disposed = true; document.removeEventListener('visibilitychange', resume); void supabase!.removeChannel(channel); };
@@ -129,7 +127,7 @@ export default function App() {
   const patch: Patch = useCallback((key, change) => setDrafts(old => ({ ...old, [key]: { ...old[key], ...change } })), []);
 
   async function run(name: string, action: () => Promise<void>): Promise<boolean> {
-    setBusy(name); setError(''); setNotice('');
+    setBusy(name); setError('');
     try { await action(); return true; } catch (e) { setError(message(e)); return false; } finally { setBusy(''); }
   }
   async function login() {
@@ -147,14 +145,12 @@ export default function App() {
     const result = await once('broadcast-attempt', [input, classrooms, teacherName], id =>
       api<{ id: string }>({ action: 'send', request_id: id, classrooms, teacher_name: teacherName, ...input }));
     setLatestId(result.id);
-    setNotice('广播已发出，正在等待教室回执');
     await getHistory(null, result.id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
   }
   async function createDisplay(display: 'board' | 'note' | 'countdown', content: object, times: object) {
     const classrooms = [...selected].sort();
     await once('display-attempt', [display, content, times, classrooms, teacherName], id =>
       rpc('create_display_item', { p_request: id, p_kind: display, p_classrooms: classrooms, p_content: content, p_teacher_name: teacherName, ...times }));
-    setNotice(`已发布到 ${classrooms.length} 个班级`);
     await refreshOverview().catch(e => setError(message(e)));
   }
   function submit() {
@@ -187,7 +183,7 @@ export default function App() {
       setKind('alert');
     }
     setSelected(item.deliveries.map(d => d.classroom_id));
-    setTab('send'); setLatestId(null); setNotice('已填入历史内容，可调整班级后发送'); window.scrollTo({ top: 0, behavior: 'smooth' });
+    setTab('send'); setLatestId(null); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   const known = configured && !!session && live && network;
   const ready = configured && !!session && network && validTeacherName(teacherName);
@@ -213,7 +209,6 @@ export default function App() {
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
       {configured && !known && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
       {error && <div className="feedback error" role="alert">{error}<button aria-label="关闭提示" onClick={() => setError('')}><X size={17} /></button></div>}
-      {notice && <output className="feedback info">{notice}</output>}
       {sw.needRefresh[0] && <div className="feedback info">有新版本可用<Button variant="link" onClick={() => void sw.updateServiceWorker(true)} disabled={!!busy}>更新应用</Button></div>}
       {tab === 'send' && <>
         <Compose kind={kind} setKind={setKind} rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected}
@@ -227,7 +222,7 @@ export default function App() {
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
         onResend={resend} rooms={rooms} known={known} now={now} configured={configured} />}
       {tab === 'devices' && <Devices rooms={rooms} ready={ready} busy={busy} onBack={() => setTab('send')}
-        onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); await refreshRooms(); setNotice('已解除设备绑定'); })} />}
+        onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); await refreshRooms(); })} />}
     </main>
   </div>;
 }

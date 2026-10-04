@@ -10,6 +10,8 @@ namespace Broadcast.Classroom;
 internal sealed class BannerWindow : Window
 {
     public const double StripHeight = 100;
+    private const double EdgeWidth = 3;
+    private readonly Border _frame;
     private bool _closing;
     internal TextBlock Body { get; }
     internal TextBlock Emoji { get; }
@@ -36,7 +38,7 @@ internal sealed class BannerWindow : Window
         var layout = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
         Grid.SetColumn(Emoji, 0); Grid.SetColumn(Body, 1); Grid.SetColumn(Teacher, 2);
         layout.Children.Add(Emoji); layout.Children.Add(Body); layout.Children.Add(Teacher);
-        Content = new Border { Padding = new Thickness(36, 12), Child = layout };
+        Content = _frame = new Border { Padding = new Thickness(36, 12), Child = layout };
         SizeChanged += (_, _) => Fit();
         Closing += (_, e) => { if (!_closing) e.Cancel = true; };
     }
@@ -47,6 +49,9 @@ internal sealed class BannerWindow : Window
         Emoji.Text = emoji; Emoji.IsVisible = emoji.Length > 0;
         Body.Text = delivery.Body; Body.Foreground = foreground;
         Teacher.Text = delivery.TeacherName;
+        // A bright line on the edge facing the desktop keeps the strip distinct from dark wallpapers.
+        _frame.BorderBrush = foreground;
+        _frame.BorderThickness = delivery.BannerPosition == "bottom" ? new Thickness(0, EdgeWidth, 0, 0) : new Thickness(0, 0, 0, EdgeWidth);
         if (Screens.Primary is { } screen)
         {
             var area = screen.WorkingArea;
@@ -62,7 +67,7 @@ internal sealed class BannerWindow : Window
     {
         Teacher.Measure(Size.Infinity); Emoji.Measure(Size.Infinity);
         var width = Math.Max(100, ClientSize.Width - 72 - Teacher.DesiredSize.Width - 24 - (Emoji.IsVisible ? Emoji.DesiredSize.Width + 16 : 0));
-        var height = StripHeight - 24;
+        var height = StripHeight - 24 - EdgeWidth;
         double lo = 14, hi = 44;
         Body.MaxLines = 0;
         while (hi - lo > .5)
