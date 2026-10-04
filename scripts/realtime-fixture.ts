@@ -9,12 +9,14 @@ Deno.serve({ hostname: '127.0.0.1', port: 54329 }, async request => {
       const input = JSON.parse(event.data);
       const reply = (event: string, payload: unknown) => socket.send(JSON.stringify({ topic: input.topic, event, ref: input.ref, join_ref: input.join_ref, payload }));
       if (input.event === 'phx_join') {
-        if (!input.join_ref || input.payload.config.postgres_changes[0].filter !== `device_id=eq.${device}`) {
+        const bindings = input.payload.config.postgres_changes;
+        if (!input.join_ref || bindings[0].filter !== `device_id=eq.${device}` || bindings[1]?.table !== 'display_items' || bindings[1].filter) {
           reply('phx_reply', { status: 'error', response: {} }); return;
         }
-        reply('phx_reply', { status: 'ok', response: { postgres_changes: [{ id: 1 }] } });
+        reply('phx_reply', { status: 'ok', response: { postgres_changes: [{ id: 1 }, { id: 2 }] } });
         reply('system', { extension: 'postgres_changes', status: 'ok', message: 'Subscribed to PostgreSQL' });
-        reply('postgres_changes', { ids: [1], data: { type: 'INSERT', record: {} } });
+        reply('postgres_changes', { ids: [1], data: { table: 'deliveries', type: 'INSERT', record: {} } });
+        reply('postgres_changes', { ids: [2], data: { table: 'display_items', type: 'UPDATE', record: {} } });
       }
       if (input.event === 'heartbeat') { keepalives++; reply('phx_reply', { status: 'ok', response: {} }); }
     };

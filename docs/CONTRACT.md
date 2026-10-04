@@ -8,10 +8,10 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 
 | action | Other request parameters | Result |
 | --- | --- | --- |
-| `send` | `request_id`, `body`, `classrooms: string[]`, `teacher_name`, `repeat_count` (0–5), `auto_close`, `emotion`, `voice_type`, nullable `source_id` | `id` |
+| `send` | `request_id`, `body`, `classrooms: string[]`, `teacher_name`, `repeat_count` (0–5), `auto_close`, `emotion`, `voice_type`, nullable `source_id`, `style` (`fullscreen` default, or `banner`), `banner_position` (`top` default, or `bottom`) | `id` |
 | `register-device` | `classroom_id`, `name` | Supabase `session`, `classroom_id`, and the device's fixed login `credential` (`id`, `email`, `password`) |
 
-Both actions are admin-only. Requests are deduplicated by `request_id`: a retry of the same logical request must keep its ID, and an explicit resend uses a new one. The Edge Function sends only text and delivery info; it never generates, stores or returns audio.
+Both actions are admin-only. A banner must have a body of at most 80 characters, `repeat_count` 0 and `auto_close` true. Requests are deduplicated by `request_id`: a retry of the same logical request must keep its ID, and an explicit resend uses a new one. The Edge Function sends only text and delivery info; it never generates, stores or returns audio.
 
 ## Database RPCs
 
@@ -20,26 +20,45 @@ Both actions are admin-only. Requests are deduplicated by `request_id`: a retry 
 | `classroom_status` | none | `{server_now, classrooms}`; admin |
 | `bind_device` | `p_device`, `p_classroom`, `p_name` | empty; admin or server |
 | `unbind_device` | `p_classroom` | empty; admin |
-| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now}`; current device |
+| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display}`; current device. `display` is the same item list as `display_state` |
 | `pending_broadcasts` | none | `{server_now, items}`; only this device's current class, not started and not expired |
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
 | `ack_delivery` | `p_delivery`, `p_event`, `p_at`, nullable `p_error` | empty; this device's receipt, safe to retry |
 | `broadcast_history` | nullable `p_before`, nullable `p_id` | up to 20 broadcasts with nested `deliveries`; admin |
+| `create_display_item` | `p_request`, `p_kind`, `p_classrooms`, `p_content`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_duration_seconds` | the request ID; admin, idempotent per request |
+| `remove_display_item` | `p_id`, `p_all` (default false) | empty; admin. `p_all` removes the item from every class of the same request |
+| `display_overview` | none | `{server_now, items}`: every live item in all classes; admin |
+| `display_state` | none | `{server_now, items}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name` |
 
 `create_broadcast` is called by the send function under the admin identity, with `p_id`, `p_body`, `p_classrooms`, `p_source`, `p_teacher_name`, `p_repeat_count`, `p_auto_close`, `p_emotion` and `p_voice_type`. It writes the broadcast and all class deliveries in one transaction.
 
-Each item in `pending_broadcasts.items` has `delivery_id`, `broadcast_id`, `body`, `teacher_name`, `repeat_count`, `auto_close`, `emotion`, `voice_type`, `created_at` and `expires_at`. The query takes no device ID; the server identifies the device from its JWT. The classroom client calls Tencent Cloud TTS directly with `body` and `voice_type` and plays the WAV locally, reusing the same WAV when `repeat_count` is above 1.
+Each item in `pending_broadcasts.items` has `delivery_id`, `broadcast_id`, `body`, `teacher_name`, `repeat_count`, `auto_close`, `emotion`, `voice_type`, `style`, `banner_position`, `created_at` and `expires_at`. The query takes no device ID; the server identifies the device from its JWT. The classroom client calls Tencent Cloud TTS directly with `body` and `voice_type` and plays the WAV locally, reusing the same WAV when `repeat_count` is above 1.
 
 `emotion` is one of `normal`, `happy`, `sad`, `angry`, `warning`. `voice_type` is one of `101001`, `101004`, `101011`, `101013`, `101016`. The teacher app ships a fixed WAV preview for each voice, all saying "请Badger去吃饭", so previews never call Tencent Cloud or Supabase.
 
 Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`, `finished` and `failed`. Each field stores the time of the first such event; a receipt cannot overwrite an existing time or update the table directly. `played` requires the delivery to have started and a `playing` receipt to exist. Times come from the client's server-calibrated clock, and the server rejects clearly future times.
 
+## Display items
+
+`display_items` holds one row per class for each board, note or countdown: `request_id`, `classroom_id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, `created_by`, `created_at` and nullable `removed_at`. Devices may select only their current class's rows (removed rows included, so Realtime delivers removals). Every write goes through the admin RPCs above.
+
+`content` by kind:
+- board: `{title, entries, speak, voice_type}`, with title at most 30 characters (default 公告) and 1–12 entries of at most 100 characters each.
+- note: `{text, color}`, with text 1–60 characters and color `yellow`, `blue`, `green` or `pink`.
+- countdown: `{label}`, at most 20 characters.
+
+Every item starts when it is created (`starts_at` is the server time); the end must fall in the future and within 7 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown in its classes. A note is refused when a target class already shows 4 notes. Device queries keep a countdown for 5 seconds past `ends_at`.
+
 ## Realtime and presence
 
-The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
+The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items` changes without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
 
-After the subscription succeeds, the classroom starts reporting heartbeats: every 20 seconds it sends a Phoenix keepalive over the WebSocket and waits for the ack (Supabase requires one at least every 25 seconds; it does no database work). Every 120 seconds it also reports the device heartbeat, and the server marks a classroom offline after 270 seconds without a valid heartbeat. Reconnects back off to about 10 seconds and, once restored, query for unexpired messages. Every 40 seconds a healthy connection also re-queries valid deliveries, so a single lost notification is not missed.
+After the subscription succeeds, the classroom starts reporting heartbeats: every 20 seconds it sends a Phoenix keepalive over the WebSocket and waits for the ack (Supabase requires one at least every 25 seconds; it does no database work). Every 120 seconds it also reports the device heartbeat, whose response carries the display state, and the server marks a classroom offline after 270 seconds without a valid heartbeat. Reconnects back off to about 10 seconds and, once restored, query for unexpired messages. Every 40 seconds a healthy connection also re-queries valid deliveries, so a single lost notification is not missed.
 
 `start_delivery` is the persistent gate against duplicate playback. If the gate was written but the app crashed before displaying, the message is not replayed; history keeps the start record and waits for a completion receipt, and one missing for over 5 minutes shows "结果待确认" (result unconfirmed). This is a deliberate trade-off between never replaying and surviving crashes, and an unknown outcome is never disguised as played.
 
 Receipts and online status are shown separately. The 30-second validity limits only when playback may start; it never interrupts a broadcast already playing. Reconnecting can only recover deliveries and submit receipts, and never replays a message that has started.
+
+## Rollout order
+
+Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items.

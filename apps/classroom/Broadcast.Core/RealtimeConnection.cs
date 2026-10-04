@@ -12,7 +12,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
     private const int RecheckEvery = 2;   // every 40 seconds, so a missed notification is recovered while a 30-second broadcast may still be valid
     private const int StatusEvery = 6;    // every 120 seconds
 
-    public async Task RunAsync(Action changed, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct)
+    public async Task RunAsync(Action changed, Action displayChanged, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct)
     {
         using var life = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var socket = new ClientWebSocket();
@@ -31,7 +31,10 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
             await SendAsync(topic, "phx_join", "join", new
             {
                 config = new { broadcast = new { ack = false, self = false }, presence = new { key = "" },
-                    postgres_changes = new[] { new { @event = "INSERT", schema = "public", table = "deliveries", filter = "device_id=eq." + backend.Session.User.Id } } },
+                    // Display items carry no filter: RLS already limits them to this device's classroom.
+                    postgres_changes = new object[] {
+                        new { @event = "INSERT", schema = "public", table = "deliveries", filter = "device_id=eq." + backend.Session.User.Id },
+                        new { @event = "*", schema = "public", table = "display_items" } } },
                 access_token = token
             });
             await ready.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
@@ -100,7 +103,11 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
                         if (payload.GetProperty("status").GetString() != "ok") throw new IOException("数据库订阅尚未就绪");
                         ready.TrySetResult();
                     }
-                    if (kind == "postgres_changes") changed();
+                    if (kind == "postgres_changes")
+                    {
+                        if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("table", out var table) && table.GetString() == "display_items") displayChanged();
+                        else changed();
+                    }
                 }
             }
             catch (Exception e) { ready.TrySetException(e); heartbeatAck?.TrySetException(e); throw; }

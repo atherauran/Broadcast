@@ -1,6 +1,9 @@
 export const CLASSROOMS = ['8-1', '8-2', '8-3', '8-4', '8-5', '8-6'] as const;
 export const EMOTIONS = ['normal', 'happy', 'sad', 'angry', 'warning'] as const;
 export const VOICE_TYPES = [101001, 101004, 101011, 101013, 101016] as const;
+export const STYLES = ['fullscreen', 'banner'] as const;
+export const BANNER_POSITIONS = ['top', 'bottom'] as const;
+export const BANNER_LIMIT = 80;
 
 export function validateBody(value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || [...value.trim()].length > 300) {
@@ -48,6 +51,24 @@ export function validateVoiceType(value: unknown): number {
     throw new Error('请选择有效的音色');
   }
   return value;
+}
+
+// A missing style means an older teacher app, which only sends fullscreen broadcasts.
+export function validateStyle(value: unknown): string {
+  if (value === undefined) return 'fullscreen';
+  if (typeof value !== 'string' || !STYLES.includes(value as typeof STYLES[number])) throw new Error('请选择有效的显示样式');
+  return value;
+}
+
+export function validateBannerPosition(value: unknown): string {
+  if (value === undefined) return 'top';
+  if (typeof value !== 'string' || !BANNER_POSITIONS.includes(value as typeof BANNER_POSITIONS[number])) throw new Error('请选择横幅位置');
+  return value;
+}
+
+export function validateBanner(body: string, repeatCount: number, autoClose: boolean) {
+  if ([...body].length > BANNER_LIMIT) throw new Error(`横幅最多 ${BANNER_LIMIT} 字`);
+  if (repeatCount !== 0 || !autoClose) throw new Error('横幅只显示文字并自动关闭');
 }
 
 export function uuid(value: unknown): string {

@@ -33,13 +33,13 @@ internal sealed class BroadcastWindow : Window
         Teacher = new TextBlock
         {
             Text = delivery.TeacherName + " 发布", Foreground = new SolidColorBrush(Color.Parse("#D6DEE9")),
-            FontFamily = new FontFamily("Microsoft YaHei, Segoe UI"), FontSize = 28, FontWeight = FontWeight.SemiBold,
+            FontFamily = new FontFamily("Microsoft YaHei, Segoe UI"), FontSize = 24, FontWeight = FontWeight.SemiBold,
             HorizontalAlignment = HorizontalAlignment.Center, TextAlignment = TextAlignment.Center,
         };
         _emoji = new TextBlock
         {
-            Text = emoji, IsVisible = emoji.Length > 0, FontSize = 78, TextAlignment = TextAlignment.Center,
-            Foreground = foreground, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 18),
+            Text = emoji, IsVisible = emoji.Length > 0, FontSize = 64, TextAlignment = TextAlignment.Center,
+            Foreground = foreground, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 0, 0, 14),
         };
         _body = new TextBlock
         {
@@ -83,7 +83,7 @@ internal sealed class BroadcastWindow : Window
         Closing += (_, e) => { if (!_closing) e.Cancel = true; };
     }
 
-    private static (string Emoji, IBrush Foreground) Style(string emotion) => emotion switch
+    internal static (string Emoji, IBrush Foreground) Style(string emotion) => emotion switch
     {
         "happy" => ("😀", new SolidColorBrush(Color.Parse("#60A5FA"))),
         "sad" => ("☹️", new SolidColorBrush(Color.Parse("#FDE047"))),
@@ -95,9 +95,9 @@ internal sealed class BroadcastWindow : Window
     private void Fit()
     {
         var width = Math.Max(100, ClientSize.Width - 128);
-        var reserved = 96 + 50 + (_emoji.IsVisible ? 110 : 0) + (_close.IsVisible ? 74 : 0);
+        var reserved = 96 + 44 + (_emoji.IsVisible ? 92 : 0) + (_close.IsVisible ? 74 : 0);
         var height = Math.Max(100, ClientSize.Height - reserved);
-        double lo = 12, hi = Math.Min(160, height);
+        double lo = 12, hi = Math.Min(150, height);
         while (hi - lo > .5)
         {
             var size = (lo + hi) / 2;
@@ -105,7 +105,8 @@ internal sealed class BroadcastWindow : Window
             _body.Measure(new Size(width, double.PositiveInfinity));
             if (_body.DesiredSize.Height <= height && _body.DesiredSize.Width <= width + 1) lo = size; else hi = size;
         }
-        _body.FontSize = lo;
+        // A notch below the largest fit, so the text has room to breathe.
+        _body.FontSize = lo * .85;
     }
 
     public void ShowCloseButton()
@@ -119,6 +120,7 @@ internal sealed class BroadcastWindow : Window
 internal sealed class BroadcastDisplay : IDisplay
 {
     private BroadcastWindow? _window;
+    internal BroadcastWindow? Current => _window;
     public async Task ShowAsync(Delivery delivery, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();

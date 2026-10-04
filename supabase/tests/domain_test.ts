@@ -1,4 +1,4 @@
-import { validateAutoClose, validateBody, validateEmotion, validateRepeatCount, validateTargets, validateTeacherName, validateVoiceType } from '../functions/_shared/domain.ts';
+import { validateAutoClose, validateBanner, validateBannerPosition, validateStyle, validateBody, validateEmotion, validateRepeatCount, validateTargets, validateTeacherName, validateVoiceType } from '../functions/_shared/domain.ts';
 function assert(value: unknown, message = 'Assertion failed'): asserts value { if (!value) throw new Error(message); }
 function rejects(fn: () => unknown) { try { fn(); } catch { return; } throw new Error('Expected rejection'); }
 Deno.test('server-side text and classroom validation', () => {
@@ -14,4 +14,11 @@ Deno.test('server-side broadcast option validation', () => {
   rejects(() => validateTeacherName(' ')); rejects(() => validateTeacherName('字'.repeat(41)));
   rejects(() => validateRepeatCount(6)); rejects(() => validateRepeatCount(1.5));
   rejects(() => validateAutoClose('true')); rejects(() => validateEmotion('excited')); rejects(() => validateVoiceType(999));
+});
+Deno.test('server-side style validation', () => {
+  assert(validateStyle(undefined) === 'fullscreen'); assert(validateStyle('banner') === 'banner');
+  assert(validateBannerPosition(undefined) === 'top'); assert(validateBannerPosition('bottom') === 'bottom');
+  rejects(() => validateStyle('popup')); rejects(() => validateBannerPosition('left'));
+  validateBanner('字'.repeat(80), 0, true);
+  rejects(() => validateBanner('字'.repeat(81), 0, true)); rejects(() => validateBanner('横幅', 1, true)); rejects(() => validateBanner('横幅', 0, false));
 });

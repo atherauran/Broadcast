@@ -29,11 +29,16 @@ public sealed record DeviceCredential(string Id, string Email, string Password);
 public sealed record RegisteredDevice(DeviceCredential Credential, string ClassroomId);
 public sealed record Classroom(string Id, string? DeviceId, string? DeviceName, string? LastSeenAt, bool Connected);
 public sealed record ClassroomStatus(DateTimeOffset ServerNow, Classroom[] Classrooms);
-public sealed record Heartbeat(bool Active, string? ClassroomId, DateTimeOffset ServerNow);
+public sealed record Heartbeat(bool Active, string? ClassroomId, DateTimeOffset ServerNow, DisplayItem[]? Display = null);
 public sealed record PendingBatch(DateTimeOffset ServerNow, Delivery[] Items);
 public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt, string TeacherName = "未知老师", int RepeatCount = 1, bool AutoClose = true,
-    string Emotion = "normal", int VoiceType = 101001);
+    string Emotion = "normal", int VoiceType = 101001, string Style = "fullscreen", string BannerPosition = "top");
+// One record for every kind: board uses Title/Entries/Speak/VoiceType, note Text/Color, countdown Label.
+public sealed record DisplayContent(string? Title = null, string[]? Entries = null, bool Speak = false, int VoiceType = 101001,
+    string? Text = null, string? Color = null, string? Label = null);
+public sealed record DisplayItem(Guid Id, string Kind, DisplayContent Content, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string TeacherName);
+public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items);
 public sealed record Receipt(Guid DeliveryId, string Event, DateTimeOffset At, string? Error = null);
 
 public sealed class ServerClock
@@ -57,6 +62,15 @@ public interface IDisplay
     Task ShowCloseButtonAsync();
     Task WaitForCloseAsync(CancellationToken ct);
     Task HideAsync();
+}
+public interface IBannerDisplay
+{
+    Task ShowAsync(Delivery delivery, CancellationToken ct);
+    Task HideAsync();
+}
+public interface IStateDisplay
+{
+    Task ApplyAsync(IReadOnlyList<DisplayItem> visible);
 }
 public interface IAudioPlayer
 {

@@ -1,6 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { uuid, validateAutoClose, validateBody, validateEmotion, validateRepeatCount, validateTargets,
-  validateTeacherName, validateVoiceType } from '../_shared/domain.ts';
+import { uuid, validateAutoClose, validateBanner, validateBannerPosition, validateBody, validateEmotion, validateRepeatCount,
+  validateStyle, validateTargets, validateTeacherName, validateVoiceType } from '../_shared/domain.ts';
 
 const url = Deno.env.get('SUPABASE_URL')!;
 const key = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -34,19 +34,23 @@ Deno.serve(async (request) => {
       const autoClose = validateAutoClose(input.auto_close);
       const emotion = validateEmotion(input.emotion);
       const voiceType = validateVoiceType(input.voice_type);
+      const style = validateStyle(input.style);
+      const bannerPosition = validateBannerPosition(input.banner_position);
+      if (style === 'banner') validateBanner(body, repeatCount, autoClose);
       const source = input.source_id ? uuid(input.source_id) : null;
-      const existing = await client.from('broadcasts').select('id,body,teacher_name,repeat_count,auto_close,emotion,voice_type,source_id').eq('id', id).maybeSingle();
+      const existing = await client.from('broadcasts').select('id,body,teacher_name,repeat_count,auto_close,emotion,voice_type,source_id,style,banner_position').eq('id', id).maybeSingle();
       if (existing.error) throw existing.error;
       if (existing.data) {
         if (existing.data.body !== body || existing.data.teacher_name !== teacherName || existing.data.repeat_count !== repeatCount ||
-          existing.data.auto_close !== autoClose || existing.data.emotion !== emotion || existing.data.voice_type !== voiceType || existing.data.source_id !== source) {
+          existing.data.auto_close !== autoClose || existing.data.emotion !== emotion || existing.data.voice_type !== voiceType || existing.data.source_id !== source ||
+          existing.data.style !== style || existing.data.banner_position !== bannerPosition) {
           throw new Error('请求编号冲突');
         }
         return reply({ id });
       }
       const created = await client.rpc('create_broadcast', { p_id: id, p_body: body, p_classrooms: classrooms,
         p_source: source, p_teacher_name: teacherName, p_repeat_count: repeatCount, p_auto_close: autoClose,
-        p_emotion: emotion, p_voice_type: voiceType });
+        p_emotion: emotion, p_voice_type: voiceType, p_style: style, p_banner_position: bannerPosition });
       if (created.error) throw created.error;
       return reply({ id: created.data });
     }

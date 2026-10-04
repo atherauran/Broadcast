@@ -75,8 +75,16 @@ public sealed class App : Application
         _speech = new TencentSpeechSynthesizer(_config.Tts);
         var clock = new ServerClock();
         var outbox = new ReceiptOutbox(Path.Combine(LocalState.Folder, "receipts-" + device.Id + ".json"));
-        var queue = new DeliveryQueue(_backend, new BroadcastDisplay(), _speech, new AudioPlayer(), outbox, clock);
-        var receiver = new ReceiverService(_backend, queue, outbox, clock);
+        var audio = new SharedAudio(new AudioPlayer());
+        var alerts = new BroadcastDisplay();
+        var banners = new BannerLane(_backend, new BannerDisplay(alerts), outbox, clock);
+        banners.Error += LocalState.Log;
+        var queue = new DeliveryQueue(_backend, alerts, _speech, audio.Primary, outbox, clock, banners);
+        var reader = new BoardReader(_speech, audio.Secondary);
+        reader.Error += LocalState.Log;
+        var display = new DisplayState(new StateDisplay(clock), clock, reader);
+        display.Error += LocalState.Log;
+        var receiver = new ReceiverService(_backend, queue, outbox, clock, display);
         receiver.StatusChanged += state => Dispatcher.UIThread.Post(() => { if (_tray is not null) _tray.ToolTipText = "校园广播 · " + state; });
         receiver.Error += LocalState.Log;
         receiver.BindingRevoked += () => Dispatcher.UIThread.Post(async () => await TransitionAsync(async () =>

@@ -64,6 +64,12 @@ Logging in and sending broadcasts also requires the shared admin password from t
 - Received, text displayed, audio started and audio finished are separate client receipts. "Played" means the software finished playing audio; it does not guarantee the classroom speaker was audible.
 - Receipts are stored on disk while offline and submitted after reconnecting; late receipts never trigger replay. Rebinding does not transfer old deliveries to the new device.
 - History keeps the text and per-class results. Resending creates a separate record with a new 30-second validity.
+- Teachers pick a type first: 全屏广播 (fullscreen alert), 横幅 (banner), 公告板 (board), 便签 (note) or 倒计时 (countdown). Everyone can send to any class and remove any item.
+- A banner is a text-only strip (at most 80 characters) at the top or bottom of the screen. It uses the broadcast pipeline with the same 30-second start validity, shows for 15 seconds, and a newer banner replaces the current one. Banners have their own lane, so they never delay a fullscreen broadcast, and an open fullscreen broadcast stays above them.
+- Boards, notes and countdowns are screen state held by the server, not messages. The classroom keeps them in memory only (nothing on disk, so DeepFreeze is fine), refreshes them on every status heartbeat and on each change, and hides them on time using its server-calibrated clock. Items show as soon as they are published and end by default at the end of today, at most 7 days ahead.
+- Boards and notes are normal windows: a slideshow or video covers them during class and they reappear at break. When a fullscreen app or presentation is running, a new board or note opens behind it without taking focus. A board (up to 12 lines of 100 characters) can be read aloud once when it appears; it is not read again after a restart or if it was missed by more than 60 seconds, and a fullscreen broadcast cuts the reading off. A class shows at most 4 notes at once.
+- A countdown is a small topmost corner timer set by duration or end time, computed on the server clock. Each class has one at a time, a new one replaces the old, and at zero it stays 5 seconds before closing.
+- The "正在显示" tab lists each class's current items with author and end time, together with the class's online state, and lets any teacher remove an item from one class or from every class it was sent to.
 
 ## Configuration and verification
 

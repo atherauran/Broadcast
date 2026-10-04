@@ -1,7 +1,7 @@
 namespace Broadcast.Core;
 
 public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSynthesizer speech, IAudioPlayer audio, ReceiptOutbox outbox,
-    ServerClock clock, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    ServerClock clock, BannerLane banners, Func<TimeSpan, CancellationToken, Task>? delay = null)
 {
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _sync = new(1, 1);
@@ -22,6 +22,8 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
             {
                 foreach (var item in batch.Items)
                 {
+                    // Banners have their own lane so they never delay a fullscreen broadcast.
+                    if (item.Style == "banner") { banners.Offer(item, ct); continue; }
                     if (_handled.Contains(item.DeliveryId) || item.ExpiresAt <= clock.Now || _waiting.ContainsKey(item.DeliveryId)) continue;
                     _waiting.Add(item.DeliveryId, item);
                     outbox.Enqueue(new Receipt(item.DeliveryId, "received", clock.Now));

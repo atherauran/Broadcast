@@ -33,12 +33,39 @@ export interface Delivery {
   audio_error: string | null;
   execution_error?: string | null;
 }
+export type Style = 'fullscreen' | 'banner';
+export type BannerPosition = 'top' | 'bottom';
 export interface Broadcast {
   id: string; body: string; created_at: string; expires_at: string;
   source_id: string | null; teacher_name: string; repeat_count: number; auto_close: boolean;
-  emotion: Emotion; voice_type: number;
+  emotion: Emotion; voice_type: number; style: Style; banner_position: BannerPosition;
   deliveries: Delivery[];
 }
+export type Kind = 'alert' | 'banner' | 'board' | 'note' | 'countdown';
+export type DisplayKind = Exclude<Kind, 'alert' | 'banner'>;
+export const KINDS: { id: Kind; label: string }[] = [
+  { id: 'alert', label: '全屏广播' },
+  { id: 'banner', label: '横幅' },
+  { id: 'board', label: '公告板' },
+  { id: 'note', label: '便签' },
+  { id: 'countdown', label: '倒计时' },
+];
+export const BANNER_LIMIT = 80;
+export const BOARD_ENTRIES = 12;
+export const BOARD_ENTRY_LIMIT = 100;
+export const NOTE_LIMIT = 60;
+export type NoteColor = 'yellow' | 'blue' | 'green' | 'pink';
+export const NOTE_COLORS: { id: NoteColor; label: string }[] = [
+  { id: 'yellow', label: '黄' }, { id: 'blue', label: '蓝' }, { id: 'green', label: '绿' }, { id: 'pink', label: '粉' },
+];
+export const COUNTDOWN_MINUTES = [5, 10, 15, 25, 45];
+export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number }
+export interface NoteContent { text: string; color: NoteColor }
+export interface CountdownContent { label: string }
+export type DisplayItem = {
+  id: string; request_id: string; classroom_id: string; starts_at: string; ends_at: string;
+  teacher_name: string; created_at: string;
+} & ({ kind: 'board'; content: BoardContent } | { kind: 'note'; content: NoteContent } | { kind: 'countdown'; content: CountdownContent });
 export function isOnline(room: Classroom, now: number): boolean {
   return !!room.device_id && room.connected && !!room.last_seen_at && now - Date.parse(room.last_seen_at) < 270_000;
 }
@@ -68,4 +95,60 @@ export function templateBlanks(template: string): number {
 export function fillTemplate(template: string, blanks: string[]): string {
   let index = 0;
   return template.replace(/_/g, () => blanks[index++]?.trim() ?? '');
+}
+const chars = (value: string) => Array.from(value.trim()).length;
+export function validBanner(body: string): boolean {
+  return chars(body) > 0 && chars(body) <= BANNER_LIMIT;
+}
+export function boardEntries(entries: string[]): string[] {
+  return entries.map(entry => entry.trim()).filter(Boolean);
+}
+export function validBoard(title: string, entries: string[]): boolean {
+  const list = boardEntries(entries);
+  return chars(title) <= 30 && list.length > 0 && list.length <= BOARD_ENTRIES && list.every(entry => chars(entry) <= BOARD_ENTRY_LIMIT);
+}
+export function validNote(text: string): boolean {
+  return chars(text) > 0 && chars(text) <= NOTE_LIMIT;
+}
+const pad = (value: number) => String(value).padStart(2, '0');
+// Values for <input type="datetime-local">, in the teacher's local time.
+export function localInput(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+export function endOfToday(now: number): string {
+  return localInput(now).slice(0, 10) + 'T23:59';
+}
+// "HH:mm" at least 10 minutes ahead, on the 5-minute grid.
+export function soonTime(now: number): string {
+  return localInput(Math.ceil((now + 600_000) / 300_000) * 300_000).slice(11);
+}
+// Today's time "HH:mm" as an absolute instant.
+export function todayAt(now: number, time: string): number {
+  const [hours, minutes] = time.split(':').map(Number);
+  const d = new Date(now); d.setHours(hours, minutes, 0, 0);
+  return d.getTime();
+}
+// An empty endAt means the end of today.
+export function endError(endAt: string, now: number): string {
+  const end = Date.parse(endAt || endOfToday(now));
+  if (Number.isNaN(end) || end <= now) return '结束时间已过';
+  if (end > now + 7 * 86_400_000) return '最多显示 7 天';
+  return '';
+}
+export function countdownError(mode: 'duration' | 'until', minutes: number, until: string, now: number): string {
+  if (mode === 'duration') return Number.isInteger(minutes) && minutes >= 1 && minutes <= 720 ? '' : '请填写 1–720 分钟';
+  const end = todayAt(now, until);
+  if (end <= now) return '结束时间已过';
+  return end - now > 12 * 3_600_000 ? '倒计时最长 12 小时' : '';
+}
+export function clockText(value: string, now: number): string {
+  const d = new Date(value); const today = new Date(now);
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  return d.toDateString() === today.toDateString() ? hm : `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+}
+export function remaining(ms: number): string {
+  const total = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(total / 3600), m = Math.floor(total % 3600 / 60), s = total % 60;
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }

@@ -2,9 +2,10 @@ namespace Broadcast.Core;
 
 public sealed class BindingRevokedException() : Exception("设备已解绑，请重新设置");
 
-public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, ReceiptOutbox outbox, ServerClock clock)
+public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, ReceiptOutbox outbox, ServerClock clock, DisplayState display)
 {
     private readonly SemaphoreSlim _work = new(0, 1);
+    private readonly SemaphoreSlim _displayWork = new(0, 1);
     public event Action<string>? StatusChanged;
     public event Action? BindingRevoked;
     public event Action<Exception>? Error;
@@ -15,6 +16,8 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         queue.Error += Report;
         var playback = queue.RunAsync(life.Token);
         var syncing = SyncLoop(life.Token);
+        var showing = display.RunAsync(life.Token);
+        var displaySyncing = DisplayLoop(life.Token);
         try
         {
             var attempt = 0;
@@ -23,11 +26,12 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
                 try
                 {
                     StatusChanged?.Invoke("正在连接");
-                    await new RealtimeConnection(backend).RunAsync(Signal, async token =>
+                    await new RealtimeConnection(backend).RunAsync(Signal, SignalDisplay, async token =>
                     {
                         var state = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, token);
                         clock.Sync(state.ServerNow);
                         if (!state.Active) throw new BindingRevokedException();
+                        if (state.Display is not null) await display.UpdateAsync(state.Display, token);
                         attempt = 0;
                         StatusChanged?.Invoke(state.ClassroomId + " · 在线");
                     }, life.Token);
@@ -49,12 +53,13 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         {
             outbox.Changed -= Signal; queue.Error -= Report;
             await life.CancelAsync();
-            try { await Task.WhenAll(playback, syncing); } catch (OperationCanceledException) { }
+            try { await Task.WhenAll(playback, syncing, showing, displaySyncing); } catch (OperationCanceledException) { }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try { await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = false }, timeout.Token); } catch (Exception) { }
         }
     }
     private void Signal() { lock (_work) if (_work.CurrentCount == 0) _work.Release(); }
+    private void SignalDisplay() { lock (_displayWork) if (_displayWork.CurrentCount == 0) _displayWork.Release(); }
     private void Report(Exception e) => Error?.Invoke(e);
     private async Task SyncLoop(CancellationToken ct)
     {
@@ -62,6 +67,22 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         {
             await _work.WaitAsync(ct);
             try { await queue.SyncAsync(ct); await outbox.FlushAsync(backend, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception e) { Report(e); }
+        }
+    }
+    // Only a display_items change fetches display state; the periodic check rides on the status heartbeat.
+    private async Task DisplayLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await _displayWork.WaitAsync(ct);
+            try
+            {
+                var state = await backend.RpcAsync<DisplayBatch>("display_state", new { }, ct);
+                clock.Sync(state.ServerNow);
+                await display.UpdateAsync(state.Items, ct);
+            }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception e) { Report(e); }
         }

@@ -6,5 +6,8 @@
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.21" />
     <ProjectReference Include="../Broadcast.Core/Broadcast.Core.csproj" />
     <Compile Include="../Broadcast.Classroom/BroadcastWindow.cs" Link="BroadcastWindow.cs" />
+    <Compile Include="../Broadcast.Classroom/BannerWindow.cs" Link="BannerWindow.cs" />
+    <Compile Include="../Broadcast.Classroom/WindowLayer.cs" Link="WindowLayer.cs" />
+    <Compile Include="../Broadcast.Classroom/StateWindows.cs" Link="StateWindows.cs" />
   </ItemGroup>
 </Project>
