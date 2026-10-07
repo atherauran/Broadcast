@@ -36,7 +36,7 @@ public sealed class App : Application
             _tray = new TrayIcon { ToolTipText = "校园广播 · 尚未绑定", Menu = menu,
                 Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Broadcast.Classroom/Assets/icon.png"))) };
             _tray.Clicked += (_, _) => ShowSettings(); TrayIcon.SetIcons(this, [_tray]);
-            desktop.Exit += (_, _) => { _appLife.Cancel(); _receiverLife?.Cancel(); _tray.Dispose(); };
+            desktop.Exit += (_, _) => { _appLife.Cancel(); _receiverLife?.Cancel(); GoOffline(); _tray.Dispose(); };
             _ = ListenForSecondInstance();
             Dispatcher.UIThread.Post(async () =>
             {
@@ -72,8 +72,8 @@ public sealed class App : Application
     {
         await StopAsync();
         _backend = new BackendClient(_config, device: device);
-        _speech = new TencentSpeechSynthesizer(_config.Tts);
         var clock = new ServerClock();
+        _speech = new TencentSpeechSynthesizer(_config.Tts, clock);
         var outbox = new ReceiptOutbox(Path.Combine(LocalState.Folder, "receipts-" + device.Id + ".json"));
         var audio = new SharedAudio(new AudioPlayer());
         var alerts = new BroadcastDisplay();
@@ -82,7 +82,7 @@ public sealed class App : Application
         var queue = new DeliveryQueue(_backend, alerts, _speech, audio.Primary, outbox, clock, banners);
         var reader = new BoardReader(_speech, audio.Secondary);
         reader.Error += LocalState.Log;
-        var display = new DisplayState(new StateDisplay(clock), clock, reader);
+        var display = new DisplayState(new StateDisplay(clock, alerts), clock, reader);
         display.Error += LocalState.Log;
         var receiver = new ReceiverService(_backend, queue, outbox, clock, display);
         receiver.StatusChanged += state => Dispatcher.UIThread.Post(() => { if (_tray is not null) _tray.ToolTipText = "校园广播 · " + state; });
@@ -103,6 +103,13 @@ public sealed class App : Application
         _speech?.Dispose(); _speech = null;
         _backend?.Dispose(); _backend = null;
         if (_tray is not null) _tray.ToolTipText = "校园广播 · 尚未绑定";
+    }
+    // Exiting without going through StopAsync (Windows shutdown or logoff) must still tell the server this PC is leaving.
+    private void GoOffline()
+    {
+        if (_backend is not { } backend) return;
+        try { Task.Run(() => backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = false }, new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token)).Wait(TimeSpan.FromSeconds(3)); }
+        catch (Exception) { }
     }
     private async Task ListenForSecondInstance()
     {

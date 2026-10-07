@@ -29,7 +29,7 @@ export function AlertForm({ draft, onChange, onError }: { draft: AlertDraft; onC
     <Textarea className="broadcast-input" aria-label="广播内容" placeholder="输入需要广播的内容…" value={draft.body} onChange={e => onChange({ body: e.target.value })} />
     <div className="template-row">{TEMPLATES.map(item => <button type="button" key={item.text} className="template-chip" onClick={() => pickTemplate(item.text)}>{item.label}</button>)}</div>
     <div className="broadcast-options">
-      <Choices legend="播报几遍" compact value={draft.repeatCount} options={[0, 1, 2, 3, 4, 5].map(id => ({ id, label: String(id) }))} onChange={repeatCount => onChange({ repeatCount })} />
+      <Choices legend="播报几遍" compact value={draft.repeatCount} options={[0, 1, 2, 3, 4].map(id => ({ id, label: String(id) }))} onChange={repeatCount => onChange({ repeatCount })} />
       <Choices legend="完成后" value={draft.autoClose ? 'auto' : 'manual'} options={[{ id: 'auto', label: '自动关闭' }, { id: 'manual', label: '保留，手动关闭' }]} onChange={value => onChange({ autoClose: value === 'auto' })} />
       <EmotionPicker value={draft.emotion} onChange={emotion => onChange({ emotion })} />
       <VoicePicker value={draft.voiceType} onChange={voiceType => onChange({ voiceType })} onError={onError} />
@@ -106,6 +106,7 @@ export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft;
         : <Option label="结束时间"><div className="choice-row">
           <TimeSelect value={draft.until} label="倒计时结束时间" onChange={until => onChange({ until })} />
         </div></Option>}
+      <Choices legend="显示方式" value={draft.fullscreen ? 'fullscreen' : 'corner'} options={[{ id: 'corner', label: '右上角' }, { id: 'fullscreen', label: '全屏' }]} onChange={value => onChange({ fullscreen: value === 'fullscreen' })} />
     </div>
   </>;
 }

@@ -8,11 +8,11 @@ Deno.test('server-side text and classroom validation', () => {
 });
 Deno.test('server-side broadcast option validation', () => {
   assert(validateTeacherName(' 王老师 ') === '王老师');
-  assert(validateRepeatCount(0) === 0); assert(validateRepeatCount(5) === 5);
+  assert(validateRepeatCount(0) === 0); assert(validateRepeatCount(4) === 4);
   assert(validateAutoClose(false) === false); assert(validateEmotion('warning') === 'warning');
   assert(validateVoiceType(101013) === 101013);
   rejects(() => validateTeacherName(' ')); rejects(() => validateTeacherName('字'.repeat(41)));
-  rejects(() => validateRepeatCount(6)); rejects(() => validateRepeatCount(1.5));
+  rejects(() => validateRepeatCount(5)); rejects(() => validateRepeatCount(1.5));
   rejects(() => validateAutoClose('true')); rejects(() => validateEmotion('excited')); rejects(() => validateVoiceType(999));
 });
 Deno.test('server-side style validation', () => {

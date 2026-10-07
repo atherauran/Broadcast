@@ -80,7 +80,7 @@ internal sealed class BroadcastWindow : Window
         Content = new Border { Padding = new Thickness(64, 48), Child = layout };
         SizeChanged += (_, _) => Fit();
         Opened += (_, _) => Fit();
-        Closing += (_, e) => { if (!_closing) e.Cancel = true; };
+        Closing += (_, e) => WindowLayer.KeepOpen(e, _closing);
     }
 
     internal static (string Emoji, IBrush Foreground) Style(string emotion) => emotion switch

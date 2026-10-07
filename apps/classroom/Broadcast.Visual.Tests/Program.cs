@@ -86,6 +86,7 @@ foreach (var (name, count, entries, width, height) in new[]
     if (board.Boards.Bounds.Height > board.ClientSize.Height - 80 + 1 && board.BaseSize > 14.5) throw new Exception(name + ": board overflows its window");
     if (name != "board-long" && board.BaseSize < 22) throw new Exception(name + ": board text below readable size");
     if (name == "board-five" && board.Columns < 2) throw new Exception(name + ": short boards should spread into columns");
+    if (board.BaseSize > 40) throw new Exception(name + ": board text above the size cap");
     using var frame = board.CaptureRenderedFrame(); frame?.Save(Path.Combine(output, name + ".png"));
     Console.WriteLine($"PASS {name}: {width}x{height}, {board.Columns} column(s), font {board.BaseSize:F1}px");
     board.Dismiss();
@@ -111,3 +112,16 @@ if (CountdownWindow.Format(TimeSpan.FromSeconds(3725)) != "1:02:05" || Countdown
 using (var frame = countdown.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "countdown.png"));
 Console.WriteLine("PASS countdown: topmost, label and digits");
 countdown.Dismiss();
+
+var shrunk = false;
+var full = new CountdownWindow(clock, () => shrunk = true) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
+full.Present(Item("countdown", new DisplayContent(Label: "距离考试结束", Fullscreen: true)) with { EndsAt = clock.Now.AddHours(1).AddMinutes(2).AddSeconds(4.5) });
+full.Show(); Dispatcher.UIThread.RunJobs();
+if (!full.Topmost || full.ShowInTaskbar || !full.IsFullscreen || full.Digits.Text != "1:02:05" || full.ShrinkButton is not { IsVisible: true })
+    throw new Exception("countdown-fullscreen: must be a topmost fullscreen timer with a shrink button");
+if (full.Digits.Parent is not Viewbox { Bounds.Width: > 900 }) throw new Exception("countdown-fullscreen: digits must fill the screen");
+using (var frame = full.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "countdown-fullscreen.png"));
+full.ShrinkButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+if (!shrunk) throw new Exception("countdown-fullscreen: shrink button does nothing");
+Console.WriteLine("PASS countdown-fullscreen: digits fill the screen, shrink button works");
+full.Dismiss();

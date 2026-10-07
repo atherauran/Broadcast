@@ -9,6 +9,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("One synthesis can be played repeatedly", Repeats),
     ("Zero repeats is an intentional text-only broadcast", ZeroRepeats),
     ("Manual close keeps the completed broadcast visible", ManualClose),
+    ("A newer broadcast interrupts one waiting to be closed, which returns afterwards", ManualCloseInterrupted),
     ("TTS failure displays only text for ten seconds", TextOnly),
     ("Audio player failure does not report played", AudioFailure),
     ("FIFO skips a queued broadcast that expires", ExpiredQueue),
@@ -141,6 +142,21 @@ static async Task ManualClose()
     Check(h.Display.Hidden == 0); h.Display.CloseGate.SetResult();
     await Until(() => h.Display.Hidden == 1); await h.Outbox.FlushAsync(h.Backend, default);
     Check(h.Delays.IsEmpty && h.Backend.Receipts.Any(r => r.Event == "finished"));
+}
+static async Task ManualCloseInterrupted()
+{
+    await using var h = new Harness(); var one = h.Item("keep") with { AutoClose = false };
+    h.Backend.Items = [one]; await h.Start(); await Until(() => h.Display.CloseShown == 1);
+    var two = h.Item("urgent") with { CreatedAt = one.CreatedAt.AddSeconds(1) }; h.Backend.Items = [one, two];
+    await h.Queue.SyncAsync(default); await Until(() => h.Display.Shown.Count == 3 && h.Display.CloseShown == 2);
+    Check(h.Display.Shown.Select(item => item.Body).SequenceEqual(new[] { "keep", "urgent", "keep" }), "The earlier broadcast did not come back");
+    Check(h.Display.Hidden == 2, "The interrupted broadcast should be hidden while the newer one plays");
+    await h.Outbox.FlushAsync(h.Backend, default);
+    Check(!h.Backend.Receipts.Any(r => r.DeliveryId == one.DeliveryId && r.Event == "finished"), "Interrupted broadcast finished early");
+    Check(h.Backend.Receipts.Count(r => r.DeliveryId == two.DeliveryId && r.Event == "finished") == 1);
+    h.Display.CloseGate.SetResult(); await Until(() => h.Display.Hidden == 3); await h.Outbox.FlushAsync(h.Backend, default);
+    Check(h.Backend.Receipts.Count(r => r.DeliveryId == one.DeliveryId && r.Event == "displayed") == 1);
+    Check(h.Backend.Receipts.Any(r => r.DeliveryId == one.DeliveryId && r.Event == "finished"));
 }
 static async Task TextOnly()
 {

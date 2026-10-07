@@ -9,7 +9,10 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
     private readonly HashSet<Guid> _handled = [];
     private readonly object _lock = new();
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
+    private TaskCompletionSource _arrived = NewArrival();
     public event Action<Exception>? Error;
+
+    private static TaskCompletionSource NewArrival() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public async Task SyncAsync(CancellationToken ct)
     {
@@ -27,6 +30,7 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
                     if (_handled.Contains(item.DeliveryId) || item.ExpiresAt <= clock.Now || _waiting.ContainsKey(item.DeliveryId)) continue;
                     _waiting.Add(item.DeliveryId, item);
                     outbox.Enqueue(new Receipt(item.DeliveryId, "received", clock.Now));
+                    _arrived.TrySetResult();
                 }
                 foreach (var id in _waiting.Where(p => p.Value.ExpiresAt <= clock.Now).Select(p => p.Key).ToArray()) _waiting.Remove(id);
                 if (_waiting.Count > 0 && _signal.CurrentCount == 0) _signal.Release();
@@ -39,36 +43,65 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
         while (!ct.IsCancellationRequested)
         {
             await _signal.WaitAsync(ct);
-            while (true)
+            await DrainAsync(ct);
+        }
+    }
+    private async Task DrainAsync(CancellationToken ct)
+    {
+        while (await RunNextAsync(ct)) { }
+    }
+    // Plays the oldest waiting broadcast; false when nothing is waiting.
+    private async Task<bool> RunNextAsync(CancellationToken ct)
+    {
+        Delivery? item;
+        lock (_lock)
+        {
+            item = _waiting.Values.OrderBy(d => d.CreatedAt).ThenBy(d => d.BroadcastId).FirstOrDefault();
+            if (item is not null) { _waiting.Remove(item.DeliveryId); _handled.Add(item.DeliveryId); }
+        }
+        if (item is null) return false;
+        if (item.ExpiresAt <= clock.Now) return true;
+        var claimed = false;
+        try
+        {
+            claimed = await backend.ClaimAsync(item.DeliveryId, ct);
+            if (!claimed) return true;
+            if (item.ExpiresAt <= clock.Now)
             {
-                Delivery? item;
-                lock (_lock)
-                {
-                    item = _waiting.Values.OrderBy(d => d.CreatedAt).ThenBy(d => d.BroadcastId).FirstOrDefault();
-                    if (item is not null) { _waiting.Remove(item.DeliveryId); _handled.Add(item.DeliveryId); }
-                }
-                if (item is null) break;
-                if (item.ExpiresAt <= clock.Now) continue;
-                var claimed = false;
-                try
-                {
-                    claimed = await backend.ClaimAsync(item.DeliveryId, ct);
-                    if (!claimed) continue;
-                    if (item.ExpiresAt <= clock.Now)
-                    {
-                        outbox.Enqueue(new Receipt(item.DeliveryId, "failed", clock.Now, "开始前广播已过期"));
-                        continue;
-                    }
-                    await PlayAsync(item, ct);
-                }
-                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                catch (Exception e)
-                {
-                    if (!claimed) { lock (_lock) _handled.Remove(item.DeliveryId); }
-                    else outbox.Enqueue(new Receipt(item.DeliveryId, "failed", clock.Now, "广播显示未完成"));
-                    Error?.Invoke(e);
-                }
+                outbox.Enqueue(new Receipt(item.DeliveryId, "failed", clock.Now, "开始前广播已过期"));
+                return true;
             }
+            await PlayAsync(item, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception e)
+        {
+            if (!claimed) { lock (_lock) _handled.Remove(item.DeliveryId); }
+            else outbox.Enqueue(new Receipt(item.DeliveryId, "failed", clock.Now, "广播显示未完成"));
+            Error?.Invoke(e);
+        }
+        return true;
+    }
+    // A finished broadcast waiting for its close button steps aside for a newer one and comes back when that one is done.
+    private async Task WaitForCloseAsync(Delivery item, CancellationToken ct)
+    {
+        while (true)
+        {
+            await display.ShowCloseButtonAsync();
+            var closed = display.WaitForCloseAsync(ct);
+            if (await Task.WhenAny(closed, NextArrival()) == closed) { await closed; return; }
+            await display.HideAsync();
+            await DrainAsync(ct);
+            await display.ShowAsync(item, ct);
+        }
+    }
+    private Task NextArrival()
+    {
+        lock (_lock)
+        {
+            if (_waiting.Values.Any(d => d.ExpiresAt > clock.Now)) return Task.CompletedTask;
+            if (_arrived.Task.IsCompleted) _arrived = NewArrival();
+            return _arrived.Task;
         }
     }
     private async Task PlayAsync(Delivery item, CancellationToken ct)
@@ -99,11 +132,7 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
                 var remaining = played ? TimeSpan.FromSeconds(3) : TimeSpan.FromSeconds(10) - System.Diagnostics.Stopwatch.GetElapsedTime(shownAt);
                 if (remaining > TimeSpan.Zero) await _delay(remaining, ct);
             }
-            else
-            {
-                await display.ShowCloseButtonAsync();
-                await display.WaitForCloseAsync(ct);
-            }
+            else await WaitForCloseAsync(item, ct);
             Report("finished");
         }
         finally { await display.HideAsync(); }

@@ -61,7 +61,7 @@ export const NOTE_COLORS: { id: NoteColor; label: string }[] = [
 export const COUNTDOWN_MINUTES = [5, 10, 15, 25, 45];
 export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number }
 export interface NoteContent { text: string; color: NoteColor }
-export interface CountdownContent { label: string }
+export interface CountdownContent { label: string; fullscreen: boolean }
 export type DisplayItem = {
   id: string; request_id: string; classroom_id: string; starts_at: string; ends_at: string;
   teacher_name: string; created_at: string;
@@ -81,6 +81,29 @@ export function deliveryStatus(d: Delivery, b: Broadcast, now: number): { label:
   if (now >= Date.parse(b.expires_at)) return { label: d.received_at ? '排队过期 · 未播放' : '已过期 · 未收到', tone: 'muted' };
   if (d.received_at) return { label: '已收到 · 等待播放', tone: 'blue' };
   return { label: d.device_id ? '等待接收' : '未绑定设备', tone: 'muted' };
+}
+// Realtime rows carry the whole record, so the screen is patched from them instead of being fetched again.
+// Delivery times only ever go from empty to set, so a row and a fetched snapshot can be merged in any order.
+export function patchDelivery(history: Broadcast[], row: Delivery & { broadcast_id: string }): Broadcast[] {
+  return history.map(item => {
+    if (item.id !== row.broadcast_id) return item;
+    const old = item.deliveries.find(d => d.id === row.id);
+    if (!old) return { ...item, deliveries: [...item.deliveries, row].sort((a, b) => a.classroom_id.localeCompare(b.classroom_id)) };
+    const set = Object.fromEntries(Object.entries(row).filter(([, value]) => value !== null && value !== undefined));
+    return { ...item, deliveries: item.deliveries.map(d => d.id === row.id ? { ...d, ...set } : d) };
+  });
+}
+export function patchRoom(rooms: Classroom[], device: { id: string; name: string; last_seen_at: string | null; connected: boolean }): Classroom[] {
+  return rooms.map(room => room.device_id === device.id
+    ? { ...room, device_name: device.name, last_seen_at: device.last_seen_at, connected: device.connected } : room);
+}
+export type DisplayRow = DisplayItem & { removed_at?: string | null; created_by?: string };
+export function patchDisplayItems(items: DisplayItem[], removal: boolean, row: Pick<DisplayRow, 'id'> & Partial<DisplayRow>): DisplayItem[] {
+  const rest = items.filter(item => item.id !== row.id);
+  if (removal || row.removed_at) return rest;
+  const { removed_at: _removed, created_by: _creator, ...item } = row as DisplayRow;
+  return [...rest, item as DisplayItem].sort((a, b) => a.classroom_id.localeCompare(b.classroom_id)
+    || Date.parse(a.starts_at) - Date.parse(b.starts_at) || Date.parse(a.created_at) - Date.parse(b.created_at));
 }
 export function validDraft(body: string, selected: string[]): boolean {
   return !!body.trim() && Array.from(body.trim()).length <= 300 && selected.length > 0;

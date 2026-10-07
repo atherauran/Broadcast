@@ -4,9 +4,9 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ArrowUpRight, AudioLines, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, api, configured, getClassrooms, getHistory, getOverview, once, rpc, supabase } from '@/lib/api';
-import { CLASSROOM_IDS, boardEntries, endOfToday, isOnline, todayAt, validTeacherName,
-  type Broadcast, type Classroom, type DisplayItem, type Kind } from '@/lib/domain';
+import { adminEmail, configured, getClassrooms, getHistory, getOverview, once, rpc, supabase } from '@/lib/api';
+import { CLASSROOM_IDS, boardEntries, endOfToday, isOnline, patchDelivery, patchDisplayItems, patchRoom, todayAt, validTeacherName,
+  type Broadcast, type Classroom, type Delivery, type DisplayItem, type DisplayRow, type Kind } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
 import { initialDrafts, type Drafts, type Patch } from './compose/drafts';
@@ -42,6 +42,7 @@ export default function App() {
   const [network, setNetwork] = useState(navigator.onLine);
   const [now, setNow] = useState(Date.now);
   const clock = useRef({ server: 0, local: 0 });
+  const historyRef = useRef(history);
   const sw = useRegisterSW();
   const userId = session?.user.id;
 
@@ -67,9 +68,14 @@ export default function App() {
     const online = () => setNetwork(true);
     const offline = () => { setNetwork(false); setLive(false); };
     window.addEventListener('online', online); window.addEventListener('offline', offline);
-    const timer = window.setInterval(() => setNow(clock.current.server + performance.now() - clock.current.local), 1000);
-    return () => { clearInterval(timer); window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
+    return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
   }, [clock]);
+  // Only the on-screen tab shows a countdown, so only it needs a per-second render.
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (!document.hidden) setNow(clock.current.server + performance.now() - clock.current.local); }, tab === 'screen' ? 1000 : 5000);
+    return () => clearInterval(timer);
+  }, [clock, tab]);
+  useEffect(() => { historyRef.current = history; }, [history]);
   const mergeHistory = useCallback((items: Broadcast[]) => setHistory(old => {
     const all = new Map(old.map(item => [item.id, item]));
     items.forEach(item => all.set(item.id, item));
@@ -90,7 +96,8 @@ export default function App() {
   useEffect(() => {
     if (!userId || !supabase || !network) return;
     let disposed = false;
-    const historyRequests = new Map<string, number>();
+    // Deliveries of a broadcast this page has not loaded yet wait here while its history is fetched once.
+    const loading = new Map<string, Delivery[]>();
     const load = async () => {
       try {
         await refreshRooms();
@@ -99,20 +106,27 @@ export default function App() {
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, () => { void refreshRooms().catch(e => setError(message(e))); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, payload => {
+        if (payload.eventType !== 'DELETE') setRooms(old => patchRoom(old, payload.new as Parameters<typeof patchRoom>[1]));
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'classrooms' }, () => { void refreshRooms().catch(e => setError(message(e))); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_items' }, () => { void refreshOverview().catch(e => setError(message(e))); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'display_items' }, payload => {
+        const removal = payload.eventType === 'DELETE';
+        setOverview(old => patchDisplayItems(old, removal, (removal ? payload.old : payload.new) as DisplayRow));
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, payload => {
-        const id = (payload.new as { broadcast_id?: string }).broadcast_id;
-        if (id) {
-          const request = (historyRequests.get(id) ?? 0) + 1;
-          historyRequests.set(id, request);
-          void getHistory(null, id).then(items => {
-            if (!disposed && historyRequests.get(id) === request) mergeHistory(items);
-          }).catch(e => {
-            if (!disposed && historyRequests.get(id) === request) setError(message(e));
-          });
-        }
+        const row = payload.new as Delivery & { broadcast_id?: string };
+        const id = row.broadcast_id;
+        if (!id) return;
+        if (historyRef.current.some(item => item.id === id)) { setHistory(old => patchDelivery(old, row as Delivery & { broadcast_id: string })); return; }
+        const waiting = loading.get(id);
+        if (waiting) { waiting.push(row); return; }
+        loading.set(id, [row]);
+        void getHistory(null, id).then(items => {
+          if (disposed) return;
+          mergeHistory(items);
+          setHistory(old => (loading.get(id) ?? []).reduce((all, late) => patchDelivery(all, late as Delivery & { broadcast_id: string }), old));
+        }).catch(e => { if (!disposed) setError(message(e)); }).finally(() => loading.delete(id));
       })
       .subscribe(status => {
         if (disposed) return;
@@ -142,10 +156,10 @@ export default function App() {
   }
   async function sendBroadcast(input: Record<string, unknown>) {
     const classrooms = [...selected].sort();
-    const result = await once('broadcast-attempt', [input, classrooms, teacherName], id =>
-      api<{ id: string }>({ action: 'send', request_id: id, classrooms, teacher_name: teacherName, ...input }));
-    setLatestId(result.id);
-    await getHistory(null, result.id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
+    const id = await once('broadcast-attempt', [input, classrooms, teacherName], id =>
+      rpc<string>('create_broadcast', { p_id: id, p_classrooms: classrooms, p_teacher_name: teacherName, ...input }));
+    setLatestId(id);
+    await getHistory(null, id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
   }
   async function createDisplay(display: 'board' | 'note' | 'countdown', content: object, times: object) {
     const classrooms = [...selected].sort();
@@ -157,13 +171,13 @@ export default function App() {
     void run('send', async () => {
       if (kind === 'alert') {
         const a = drafts.alert;
-        await sendBroadcast({ body: a.body, source_id: a.sourceId, repeat_count: a.repeatCount, auto_close: a.autoClose, emotion: a.emotion,
-          voice_type: a.voiceType, style: 'fullscreen', banner_position: 'top' });
+        await sendBroadcast({ p_body: a.body, p_source: a.sourceId, p_repeat_count: a.repeatCount, p_auto_close: a.autoClose, p_emotion: a.emotion,
+          p_voice_type: a.voiceType, p_style: 'fullscreen', p_banner_position: 'top' });
         patch('alert', { sourceId: null });
       } else if (kind === 'banner') {
         const b = drafts.banner;
-        await sendBroadcast({ body: b.body, source_id: null, repeat_count: 0, auto_close: true, emotion: b.emotion,
-          voice_type: 101001, style: 'banner', banner_position: b.position });
+        await sendBroadcast({ p_body: b.body, p_source: null, p_repeat_count: 0, p_auto_close: true, p_emotion: b.emotion,
+          p_voice_type: 101001, p_style: 'banner', p_banner_position: b.position });
       } else if (kind === 'board') {
         const b = drafts.board;
         await createDisplay('board', { title: b.title.trim(), entries: boardEntries(b.entries), speak: b.speak, voice_type: b.voiceType }, endsAt(b.endAt, now));
@@ -171,7 +185,7 @@ export default function App() {
         await createDisplay('note', { text: drafts.note.text.trim(), color: drafts.note.color }, endsAt(drafts.note.endAt, now));
       } else {
         const c = drafts.countdown;
-        await createDisplay('countdown', { label: c.label.trim() }, c.mode === 'until'
+        await createDisplay('countdown', { label: c.label.trim(), fullscreen: c.fullscreen }, c.mode === 'until'
           ? { p_ends_at: new Date(todayAt(now, c.until)).toISOString() } : { p_duration_seconds: c.minutes * 60 });
       }
     });

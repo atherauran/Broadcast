@@ -5,6 +5,7 @@ public sealed class BindingRevokedException() : Exception("设备已解绑，请
 public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, ReceiptOutbox outbox, ServerClock clock, DisplayState display)
 {
     private readonly SemaphoreSlim _work = new(0, 1);
+    private readonly SemaphoreSlim _flushWork = new(0, 1);
     private readonly SemaphoreSlim _displayWork = new(0, 1);
     public event Action<string>? StatusChanged;
     public event Action? BindingRevoked;
@@ -12,10 +13,11 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
     public async Task RunAsync(CancellationToken ct)
     {
         using var life = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        outbox.Changed += Signal;
+        outbox.Changed += SignalFlush;
         queue.Error += Report;
         var playback = queue.RunAsync(life.Token);
         var syncing = SyncLoop(life.Token);
+        var flushing = FlushLoop(life.Token);
         var showing = display.RunAsync(life.Token);
         var displaySyncing = DisplayLoop(life.Token);
         try
@@ -26,7 +28,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
                 try
                 {
                     StatusChanged?.Invoke("正在连接");
-                    await new RealtimeConnection(backend).RunAsync(Signal, SignalDisplay, async token =>
+                    await new RealtimeConnection(backend).RunAsync(SignalAll, SignalDisplay, async token =>
                     {
                         var state = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, token);
                         clock.Sync(state.ServerNow);
@@ -51,14 +53,17 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         }
         finally
         {
-            outbox.Changed -= Signal; queue.Error -= Report;
+            outbox.Changed -= SignalFlush; queue.Error -= Report;
             await life.CancelAsync();
-            try { await Task.WhenAll(playback, syncing, showing, displaySyncing); } catch (OperationCanceledException) { }
+            try { await Task.WhenAll(playback, syncing, flushing, showing, displaySyncing); } catch (OperationCanceledException) { }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try { await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = false }, timeout.Token); } catch (Exception) { }
         }
     }
     private void Signal() { lock (_work) if (_work.CurrentCount == 0) _work.Release(); }
+    private void SignalFlush() { lock (_flushWork) if (_flushWork.CurrentCount == 0) _flushWork.Release(); }
+    // A Realtime notification or periodic check looks for new broadcasts and also retries stuck receipts.
+    private void SignalAll() { Signal(); SignalFlush(); }
     private void SignalDisplay() { lock (_displayWork) if (_displayWork.CurrentCount == 0) _displayWork.Release(); }
     private void Report(Exception e) => Error?.Invoke(e);
     private async Task SyncLoop(CancellationToken ct)
@@ -66,7 +71,18 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         while (!ct.IsCancellationRequested)
         {
             await _work.WaitAsync(ct);
-            try { await queue.SyncAsync(ct); await outbox.FlushAsync(backend, ct); }
+            try { await queue.SyncAsync(ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception e) { Report(e); }
+        }
+    }
+    // Receipts have their own loop, so a new receipt never triggers a broadcast query and a slow upload never delays one.
+    private async Task FlushLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await _flushWork.WaitAsync(ct);
+            try { await outbox.FlushAsync(backend, ct); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception e) { Report(e); }
         }

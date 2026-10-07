@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TEMPLATES, countdownError, endOfToday, localInput, endError, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery } from '../lib/domain';
+import { patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfToday, localInput, endError, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -48,5 +48,33 @@ describe('display styles', () => {
   });
   it('formats the remaining countdown time', () => {
     expect(remaining(25 * 60_000)).toBe('25:00'); expect(remaining(3_725_000)).toBe('1:02:05'); expect(remaining(-5)).toBe('00:00');
+  });
+});
+
+describe('patching from realtime rows', () => {
+  it('merges a delivery row without losing times already known, in any order', () => {
+    const late = { ...d, broadcast_id: 'one', received_at: 'r', displayed_at: 'd' };
+    const early = { ...d, broadcast_id: 'one', received_at: 'r' };
+    const once = patchDelivery([b], late)[0].deliveries[0];
+    expect(patchDelivery([{ ...b, deliveries: [once] }], early)[0].deliveries[0]).toMatchObject({ received_at: 'r', displayed_at: 'd' });
+  });
+  it('adds a delivery of a known broadcast and ignores another broadcast', () => {
+    const next = { ...d, id: 'two', classroom_id: '8-0', broadcast_id: 'one' };
+    expect(patchDelivery([b], next)[0].deliveries.map(x => x.id)).toEqual(['two', 'one']);
+    expect(patchDelivery([b], { ...next, broadcast_id: 'other' })[0]).toBe(b);
+  });
+  it('patches only the room that owns the device', () => {
+    const rooms = [room, { ...room, id: '8-2', device_id: 'two' }];
+    const next = patchRoom(rooms, { id: 'two', name: 'PC2', last_seen_at: 'now', connected: false });
+    expect(next[0]).toBe(rooms[0]); expect(next[1]).toMatchObject({ device_name: 'PC2', last_seen_at: 'now', connected: false });
+  });
+  it('keeps display items sorted by class and start, and drops removed or deleted ones', () => {
+    const item = (id: string, classroom_id: string, starts_at: string) => ({ id, request_id: 'r', classroom_id, kind: 'note', content: { text: '', color: 'yellow' },
+      starts_at, ends_at: '2030-01-01T00:00:00Z', teacher_name: '李老师', created_at: starts_at }) as DisplayItem;
+    const a = item('a', '8-2', '2026-10-01T08:00:00Z'), c = item('c', '8-1', '2026-10-01T09:00:00Z');
+    expect(patchDisplayItems(patchDisplayItems([], false, a), false, c).map(x => x.id)).toEqual(['c', 'a']);
+    expect(patchDisplayItems([a, c], false, { ...a, removed_at: 'now' } as never).map(x => x.id)).toEqual(['c']);
+    expect(patchDisplayItems([a, c], true, { id: 'c' }).map(x => x.id)).toEqual(['a']);
+    expect(patchDisplayItems([a], false, { ...a, created_by: 'x', removed_at: null } as never)[0]).not.toHaveProperty('created_by');
   });
 });

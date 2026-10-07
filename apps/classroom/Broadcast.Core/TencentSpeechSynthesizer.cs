@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace Broadcast.Core;
 
-public sealed class TencentSpeechSynthesizer(TencentTtsConfig config) : ISpeechSynthesizer, IDisposable
+public sealed class TencentSpeechSynthesizer(TencentTtsConfig config, ServerClock clock) : ISpeechSynthesizer, IDisposable
 {
     private const string Host = "tts.tencentcloudapi.com";
     private static readonly HashSet<int> SupportedVoiceTypes = [101001, 101004, 101011, 101013, 101016];
@@ -22,7 +22,8 @@ public sealed class TencentSpeechSynthesizer(TencentTtsConfig config) : ISpeechS
 
     private async Task<byte[]> SynthesizePartAsync(string text, int voiceType, CancellationToken ct)
     {
-        var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        // The signature is only valid within minutes of Tencent's time, so it uses the server-calibrated clock rather than the PC's.
+        var timestamp = clock.Now.ToUnixTimeSeconds();
         var date = DateTimeOffset.FromUnixTimeSeconds(timestamp).UtcDateTime.ToString("yyyy-MM-dd");
         var payload = JsonSerializer.Serialize(new
         {
@@ -109,7 +110,7 @@ public sealed class TencentSpeechSynthesizer(TencentTtsConfig config) : ISpeechS
         }
         if (format is null || data.Count == 0) throw new InvalidOperationException("音频内容为空");
         if (format.Length < 12) throw new InvalidOperationException("音频格式无效");
-        var leadIn = new byte[checked((int)BinaryPrimitives.ReadUInt32LittleEndian(format.AsSpan(8, 4)))];
+        var leadIn = WakeSound(format);
         if (leadIn.Length == 0) throw new InvalidOperationException("音频格式无效");
         data.Insert(0, leadIn);
         var formatLength = format.Length + format.Length % 2;
@@ -126,6 +127,26 @@ public sealed class TencentSpeechSynthesizer(TencentTtsConfig config) : ISpeechS
         var destination = 28 + formatLength;
         foreach (var chunk in data) { chunk.CopyTo(result, destination); destination += chunk.Length; }
         return result;
+    }
+
+    // A sleeping speaker, HDMI or Bluetooth output needs real signal to wake up; digital silence does not always do it.
+    private const double WakeSeconds = .5, WakeHz = 440, WakeLevel = .01, WakeFade = .1;
+    private static byte[] WakeSound(byte[] format)
+    {
+        var channels = BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(2, 2));
+        var rate = BinaryPrimitives.ReadUInt32LittleEndian(format.AsSpan(4, 4));
+        var blockAlign = BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(12, 2));
+        var bits = BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(14, 2));
+        var frames = (int)(rate * WakeSeconds);
+        var sound = new byte[checked(frames * blockAlign)];
+        if (bits != 16 || blockAlign < channels * 2) return sound;
+        for (var frame = 0; frame < frames; frame++)
+        {
+            var fade = Math.Min(1, Math.Min(frame, frames - 1 - frame) / (rate * WakeFade));
+            var sample = (short)(Math.Sin(2 * Math.PI * WakeHz * frame / rate) * WakeLevel * short.MaxValue * fade);
+            for (var channel = 0; channel < channels; channel++) BinaryPrimitives.WriteInt16LittleEndian(sound.AsSpan(frame * blockAlign + channel * 2, 2), sample);
+        }
+        return sound;
     }
 
     private static void WriteText(byte[] target, int offset, string value) => Encoding.ASCII.GetBytes(value).CopyTo(target, offset);

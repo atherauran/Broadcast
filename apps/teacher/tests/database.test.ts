@@ -50,6 +50,8 @@ beforeAll(async () => {
   await db.exec(await readFile(new URL('../../../supabase/migrations/202610050001_broadcast_style.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../../supabase/migrations/202610060001_display_items.sql', import.meta.url), 'utf8'));
   await db.exec(await readFile(new URL('../../../supabase/migrations/202610070001_display_starts_now.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../../supabase/migrations/202610080001_countdown_fullscreen.sql', import.meta.url), 'utf8'));
+  await db.exec(await readFile(new URL('../../../supabase/migrations/202610090001_repeat_max_four.sql', import.meta.url), 'utf8'));
   await identity(admin, 'admin');
   await db.query('select bind_device($1,$2,$3)', [first, '8-1', 'classroom-one']);
   await db.query('select bind_device($1,$2,$3)', [second, '8-2', 'classroom-two']);
@@ -118,6 +120,13 @@ describe('database contract and RLS (real PostgreSQL engine)', () => {
   });
 });
 describe('banner style', () => {
+  it('plays a broadcast at most 4 times', async () => {
+    await identity(admin, 'admin');
+    const send = (repeat: number) => db.query('select create_broadcast($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+      [crypto.randomUUID(), '请同学们回到教室。', ['8-1'], null, '王老师', repeat, true, 'normal', 101001, 'fullscreen', 'top']);
+    await send(4);
+    await expect(send(5)).rejects.toThrow('播报次数');
+  });
   const banner = (body: string, repeat = 0, autoClose = true) => db.query('select create_broadcast($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
     [crypto.randomUUID(), body, ['8-1'], null, '王老师', repeat, autoClose, 'happy', 101001, 'banner', 'bottom']);
   it('delivers a text-only banner with its position', async () => {
@@ -164,13 +173,16 @@ describe('display items', () => {
   it('keeps one countdown per class, computes its end on the server and lingers 5 seconds', async () => {
     await clearDisplay(); await show('countdown', { label: '午休' }, ['8-1', '8-2'], { duration: 1500 });
     const second = await show('countdown', { label: '考试' }, ['8-1'], { duration: 600 });
-    const items = await screen(); expect(items.map(i => i.content.label)).toEqual(['考试']);
+    const items = await screen(); expect(items.map(i => i.content)).toEqual([{ label: '考试', fullscreen: false }]);
     await identity(admin, 'admin');
     expect(await scalar<number>('select extract(epoch from ends_at-starts_at)::int from display_items where request_id=$1', [second])).toBe(600);
     await db.exec('reset role');
     await db.query("update display_items set starts_at=clock_timestamp()-interval '1 minute', ends_at=clock_timestamp()-interval '3 seconds' where request_id=$1", [second]);
     expect(await screen()).toHaveLength(1);
     await expect(show('countdown', { label: '太长' }, ['8-1'], { duration: 43_201 })).rejects.toThrow('倒计时');
+    await clearDisplay(); await show('countdown', { label: '全屏', fullscreen: true }, ['8-1'], { duration: 600 });
+    expect((await screen()).map(i => i.content)).toEqual([{ label: '全屏', fullscreen: true }]);
+    await expect(show('countdown', { label: '全屏', fullscreen: 'yes' }, ['8-1'], { duration: 600 })).rejects.toThrow('显示方式');
   });
   it('validates content and times', async () => {
     await expect(show('board', { entries: [], speak: false, voice_type: 101001 })).rejects.toThrow('1–12');

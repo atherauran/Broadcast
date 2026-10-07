@@ -1,7 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Broadcast.Core;
@@ -13,7 +15,7 @@ internal abstract class StateWindow : Window
 {
     private bool _closing;
     protected static readonly FontFamily Font = new("Microsoft YaHei, Segoe UI");
-    protected StateWindow() { Closing += (_, e) => { if (!_closing) e.Cancel = true; }; }
+    protected StateWindow() { Closing += (_, e) => WindowLayer.KeepOpen(e, _closing); }
     public void Dismiss() { _closing = true; Close(); }
 
     protected static string Until(DateTimeOffset end)
@@ -38,7 +40,7 @@ internal abstract class StateWindow : Window
 // Boards flow top to bottom, then into the next column, in whichever column count gives the largest text.
 internal sealed class BoardWindow : StateWindow
 {
-    private const double ColumnGap = 56, MinColumn = 320, MinSize = 14, MaxSize = 64;
+    private const double ColumnGap = 56, MinColumn = 320, MinSize = 14, MaxSize = 40;
     private readonly Grid _columns = new();
     // A block is one entry; the board's title rides on its first entry and the footer on its last, so neither is orphaned.
     private readonly List<(StackPanel Panel, bool Starts)> _blocks = [];
@@ -219,6 +221,7 @@ internal sealed class NotesWindow : StateWindow
     }
 }
 
+// The corner timer, or a fullscreen one the class can shrink back to the corner.
 internal sealed class CountdownWindow : StateWindow
 {
     private static readonly IBrush Running = Brushes.White;
@@ -228,22 +231,43 @@ internal sealed class CountdownWindow : StateWindow
     private DateTimeOffset _end;
     internal TextBlock Label { get; }
     internal TextBlock Digits { get; }
+    internal Button? ShrinkButton { get; }
+    public bool IsFullscreen => ShrinkButton is not null;
 
-    public CountdownWindow(ServerClock clock)
+    public CountdownWindow(ServerClock clock, Action? shrink = null)
     {
         _clock = clock;
         SystemDecorations = SystemDecorations.None; ShowInTaskbar = false; Topmost = true; CanResize = false;
-        TransparencyLevelHint = [WindowTransparencyLevel.Transparent]; Background = Brushes.Transparent;
-        SizeToContent = SizeToContent.WidthAndHeight;
         Label = Text("", 20, "#D6DEE9", FontWeight.SemiBold); Label.HorizontalAlignment = HorizontalAlignment.Center;
         Digits = new TextBlock { FontFamily = new FontFamily("Consolas, Cascadia Mono, Microsoft YaHei"), FontSize = 64, FontWeight = FontWeight.Bold,
             HorizontalAlignment = HorizontalAlignment.Center };
-        var stack = new StackPanel(); stack.Children.Add(Label); stack.Children.Add(Digits);
-        Content = new Border { Background = new SolidColorBrush(Color.Parse("#EB111827")), CornerRadius = new CornerRadius(18),
-            Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = stack };
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal, (_, _) => Tick());
-        SizeChanged += (_, _) => PlaceInCorner(top: true);
         Closed += (_, _) => _timer.Stop();
+        if (shrink is null)
+        {
+            TransparencyLevelHint = [WindowTransparencyLevel.Transparent]; Background = Brushes.Transparent;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            var stack = new StackPanel(); stack.Children.Add(Label); stack.Children.Add(Digits);
+            Content = new Border { Background = new SolidColorBrush(Color.Parse("#EB111827")), CornerRadius = new CornerRadius(18),
+                Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = stack };
+            SizeChanged += (_, _) => PlaceInCorner(top: true);
+            return;
+        }
+        WindowState = WindowState.FullScreen; RequestedThemeVariant = ThemeVariant.Dark;
+        Background = new SolidColorBrush(Color.Parse("#111827"));
+        Label.FontSize = 44;
+        // The digits scale to whatever room the screen leaves, however many places they need.
+        var digits = new Viewbox { Child = Digits, Margin = new Thickness(0, 24, 0, 0) };
+        var layout = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
+        Grid.SetRow(digits, 1); layout.Children.Add(Label); layout.Children.Add(digits);
+        ShrinkButton = new Button
+        {
+            Content = "缩小", FontFamily = Font, FontSize = 20, Padding = new Thickness(24, 10), CornerRadius = new CornerRadius(10),
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 24, 24, 0),
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
+        ShrinkButton.Click += (_, _) => shrink();
+        Content = new Grid { Children = { new Border { Padding = new Thickness(64, 48), Child = layout }, ShrinkButton } };
     }
 
     public void Present(DisplayItem countdown)
@@ -266,11 +290,13 @@ internal sealed class CountdownWindow : StateWindow
     }
 }
 
-internal sealed class StateDisplay(ServerClock clock) : IStateDisplay
+internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) : IStateDisplay
 {
     private BoardWindow? _board;
     private NotesWindow? _notes;
     private CountdownWindow? _countdown;
+    private DisplayItem? _timer;
+    private Guid _shrunk;
 
     public async Task ApplyAsync(IReadOnlyList<DisplayItem> visible) => await Dispatcher.UIThread.InvokeAsync(() =>
     {
@@ -279,8 +305,23 @@ internal sealed class StateDisplay(ServerClock clock) : IStateDisplay
         var countdown = visible.Where(i => i.Kind == "countdown").MaxBy(i => i.StartsAt);
         Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards), WindowLayer.ShowBehindLesson);
         Sync(ref _notes, notes.Length > 0, () => new NotesWindow(), w => w.Present(notes), WindowLayer.ShowBehindLesson);
-        Sync(ref _countdown, countdown is not null, () => new CountdownWindow(clock), w => w.Present(countdown!), WindowLayer.ShowPassive);
+        _timer = countdown; ShowCountdown();
     });
+
+    // A shrunk countdown stays in the corner until a new one replaces it.
+    private void ShowCountdown()
+    {
+        var fullscreen = _timer is { Content.Fullscreen: true } && _timer.Id != _shrunk;
+        if (_countdown is not null && _countdown.IsFullscreen != fullscreen) { _countdown.Dismiss(); _countdown = null; }
+        Sync(ref _countdown, _timer is not null, () => new CountdownWindow(clock, fullscreen ? Shrink : null), w => w.Present(_timer!), w =>
+        {
+            WindowLayer.ShowPassive(w);
+            // A fullscreen broadcast already on screen stays above the timer.
+            if (alerts.Current is { } alert) WindowLayer.PlaceBelow(w, alert);
+        });
+    }
+
+    private void Shrink() { _shrunk = _timer!.Id; ShowCountdown(); }
 
     private static BoardWindow NewBoard()
     {

@@ -39,7 +39,7 @@ bash scripts/publish-windows.sh
 ```
 
 If the SDK is not on PATH, set `DOTNET_BIN=/full/path/dotnet` for the scripts.
-The Windows build is `artifacts/windows-x64/Broadcast.Classroom.exe`, and the distribution package is `artifacts/Broadcast.Classroom-win-x64.zip` (EXE, config and usage guide). The self-contained EXE needs no preinstalled .NET. The publish script packages the untracked `appsettings.local.json` if present, and falls back to the safe template otherwise.
+The Windows build is `artifacts/windows-x64/Broadcast.Classroom.exe`, and the distribution package is `artifacts/Broadcast.Classroom-win-x64.zip` (EXE, its native libraries, config and usage guide; keep the files together). The self-contained, ReadyToRun-compiled EXE needs no preinstalled .NET and extracts nothing at launch. A supervisor process restarts the app after any abnormal exit. The publish script packages the untracked `appsettings.local.json` if present, and falls back to the safe template otherwise.
 
 ## First-time setup (after cloning)
 
@@ -58,9 +58,9 @@ Logging in and sending broadcasts also requires the shared admin password from t
 - A broadcast is at most 300 Unicode characters and is valid for 30 seconds from its server-side creation time. Waiting for speech synthesis does not count against this.
 - Common broadcast templates appear below the input box. Templates with blanks open a dialog to fill them in, then replace the input text.
 - Classrooms play in FIFO order. A broadcast that hasn't started after 30 seconds is skipped; one that has started plays to the end. The server records started deliveries atomically, so a client restart never replays them.
-- Each broadcast plays its speech 0–5 times (0 means text only). Repeats reuse one synthesis request, so there is no extra synthesis cost.
+- Each broadcast plays its speech 0–4 times (0 means text only). Repeats reuse one synthesis request, so there is no extra synthesis cost.
 - Emotion can be happy, sad, angry, warning or normal; classrooms distinguish them with distinct text colors and emoji. Five Tencent Cloud Chinese voices are available.
-- With auto-close, the message stays 3 seconds after audio ends normally. If speech fails or repeat is 0, it stays 10 seconds in total. With manual close, a large "关闭" (Close) button appears once playback finishes.
+- With auto-close, the message stays 3 seconds after audio ends normally. If speech fails or repeat is 0, it stays 10 seconds in total. With manual close, a large "关闭" (Close) button appears once playback finishes. A newer broadcast interrupts one that is only waiting to be closed; when the newer one closes, the earlier one comes back and keeps waiting.
 - Received, text displayed, audio started and audio finished are separate client receipts. "Played" means the software finished playing audio; it does not guarantee the classroom speaker was audible.
 - Receipts are stored on disk while offline and submitted after reconnecting; late receipts never trigger replay. Rebinding does not transfer old deliveries to the new device.
 - History keeps the text and per-class results. Resending creates a separate record with a new 30-second validity.
@@ -68,7 +68,7 @@ Logging in and sending broadcasts also requires the shared admin password from t
 - A banner is a text-only strip (at most 80 characters) at the top or bottom of the screen. It uses the broadcast pipeline with the same 30-second start validity, shows for 15 seconds, and a newer banner replaces the current one. Banners have their own lane, so they never delay a fullscreen broadcast, and an open fullscreen broadcast stays above them.
 - Boards, notes and countdowns are screen state held by the server, not messages. The classroom keeps them in memory only (nothing on disk, so DeepFreeze is fine), refreshes them on every status heartbeat and on each change, and hides them on time using its server-calibrated clock. Items show as soon as they are published and end by default at the end of today, at most 7 days ahead.
 - Boards and notes are normal windows: a slideshow or video covers them during class and they reappear at break. When a fullscreen app or presentation is running, a new board or note opens behind it without taking focus. A board (up to 12 lines of 100 characters) can be read aloud once when it appears; it is not read again after a restart or if it was missed by more than 60 seconds, and a fullscreen broadcast cuts the reading off. A class shows at most 4 notes at once.
-- A countdown is a small topmost corner timer set by duration or end time, computed on the server clock. Each class has one at a time, a new one replaces the old, and at zero it stays 5 seconds before closing.
+- A countdown is a small topmost corner timer, or a fullscreen one the classroom can shrink to the corner, set by duration or end time, computed on the server clock. Each class has one at a time, a new one replaces the old, and at zero it stays 5 seconds before closing.
 - The "正在显示" tab lists each class's current items with author and end time, together with the class's online state, and lets any teacher remove an item from one class or from every class it was sent to.
 
 ## Configuration and verification

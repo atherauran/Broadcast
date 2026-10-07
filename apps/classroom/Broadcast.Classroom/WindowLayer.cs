@@ -8,6 +8,12 @@ internal static class WindowLayer
 {
     private const uint NoSize = 0x1, NoMove = 0x2, NoActivate = 0x10;
 
+    // Classroom users cannot close these windows, but they must not hold up Windows shutdown or the app's own exit.
+    public static void KeepOpen(WindowClosingEventArgs e, bool dismissed)
+    {
+        if (!dismissed && e.CloseReason is not (WindowCloseReason.OSShutdown or WindowCloseReason.ApplicationShutdown)) e.Cancel = true;
+    }
+
     public static void ShowPassive(Window window)
     {
         window.ShowActivated = false;

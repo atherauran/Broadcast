@@ -28,8 +28,8 @@ export function validateTeacherName(value: unknown): string {
 }
 
 export function validateRepeatCount(value: unknown): number {
-  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 5) {
-    throw new Error('播报次数必须为 0–5');
+  if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 4) {
+    throw new Error('播报次数必须为 0–4');
   }
   return value as number;
 }

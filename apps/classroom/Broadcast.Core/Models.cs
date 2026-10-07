@@ -34,9 +34,9 @@ public sealed record PendingBatch(DateTimeOffset ServerNow, Delivery[] Items);
 public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt, string TeacherName = "未知老师", int RepeatCount = 1, bool AutoClose = true,
     string Emotion = "normal", int VoiceType = 101001, string Style = "fullscreen", string BannerPosition = "top");
-// One record for every kind: board uses Title/Entries/Speak/VoiceType, note Text/Color, countdown Label.
+// One record for every kind: board uses Title/Entries/Speak/VoiceType, note Text/Color, countdown Label/Fullscreen.
 public sealed record DisplayContent(string? Title = null, string[]? Entries = null, bool Speak = false, int VoiceType = 101001,
-    string? Text = null, string? Color = null, string? Label = null);
+    string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false);
 public sealed record DisplayItem(Guid Id, string Kind, DisplayContent Content, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string TeacherName);
 public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items);
 public sealed record Receipt(Guid DeliveryId, string Event, DateTimeOffset At, string? Error = null);

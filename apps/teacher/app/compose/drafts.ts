@@ -4,7 +4,7 @@ export interface AlertDraft { body: string; repeatCount: number; autoClose: bool
 export interface BannerDraft { body: string; emotion: Emotion; position: BannerPosition }
 export interface BoardDraft { title: string; entries: string[]; speak: boolean; voiceType: number; endAt: string }
 export interface NoteDraft { text: string; color: NoteColor; endAt: string }
-export interface CountdownDraft { label: string; mode: 'duration' | 'until'; minutes: number; until: string }
+export interface CountdownDraft { label: string; mode: 'duration' | 'until'; minutes: number; until: string; fullscreen: boolean }
 export interface Drafts { alert: AlertDraft; banner: BannerDraft; board: BoardDraft; note: NoteDraft; countdown: CountdownDraft }
 export type Patch = <K extends keyof Drafts>(kind: K, change: Partial<Drafts[K]>) => void;
 
@@ -14,5 +14,5 @@ export const initialDrafts = (): Drafts => ({
   banner: { body: '', emotion: 'normal', position: 'top' },
   board: { title: '', entries: [''], speak: false, voiceType: 101001, endAt: '' },
   note: { text: '', color: 'yellow', endAt: '' },
-  countdown: { label: '', mode: 'duration', minutes: 25, until: '' },
+  countdown: { label: '', mode: 'duration', minutes: 25, until: '', fullscreen: false },
 });

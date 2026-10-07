@@ -40,7 +40,7 @@ internal sealed class BannerWindow : Window
         layout.Children.Add(Emoji); layout.Children.Add(Body); layout.Children.Add(Teacher);
         Content = _frame = new Border { Padding = new Thickness(36, 12), Child = layout };
         SizeChanged += (_, _) => Fit();
-        Closing += (_, e) => { if (!_closing) e.Cancel = true; };
+        Closing += (_, e) => WindowLayer.KeepOpen(e, _closing);
     }
 
     public void Present(Delivery delivery)
