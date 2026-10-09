@@ -115,25 +115,39 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
   </>;
 }
 
-// Typed as yyyy/mm/dd (slashes are added as digits are typed) or picked from the calendar button.
+// A yyyy/mm/dd mask: typed digits replace the placeholder letters one by one and the slashes stay put.
+// The input holds the masked text but is drawn transparent; the layer behind it greys whatever is still a placeholder.
+const maskText = (digits: string) => { const full = digits + 'yyyymmdd'.slice(digits.length); return `${full.slice(0, 4)}/${full.slice(4, 6)}/${full.slice(6)}`; };
+const caretAt = (digits: number) => digits + (digits > 6 ? 2 : digits > 4 ? 1 : 0);
+const realDate = (digits: string) => {
+  const [y, m, d] = [+digits.slice(0, 4), +digits.slice(4, 6), +digits.slice(6)];
+  const date = new Date(y, m - 1, d);
+  return digits.length === 8 && date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+};
+
 function DateInput({ value, now, onChange }: { value: string; now: number; onChange: (date: string) => void }) {
-  const [text, setText] = useState(value.replaceAll('-', '/'));
-  const picker = useRef<HTMLInputElement>(null);
+  const [digits, setDigits] = useState(value.replaceAll('-', ''));
+  const input = useRef<HTMLInputElement>(null);
   function edit(raw: string) {
-    const digits = raw.replace(/\D/g, '').slice(0, 8);
-    const shown = [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6)].filter(Boolean).join('/');
-    const [y, m, d] = shown.split('/').map(Number);
-    const real = new Date(y, m - 1, d);
-    setText(shown);
-    onChange(digits.length === 8 && real.getFullYear() === y && real.getMonth() === m - 1 && real.getDate() === d ? shown.replaceAll('/', '-') : '');
+    const next = raw.replace(/\D/g, '').slice(0, 8);
+    setDigits(next);
+    onChange(realDate(next) ? `${next.slice(0, 4)}-${next.slice(4, 6)}-${next.slice(6)}` : '');
+    const caret = caretAt(next.length);
+    requestAnimationFrame(() => input.current?.setSelectionRange(caret, caret));
   }
+  const parked = () => { const caret = caretAt(digits.length); input.current?.setSelectionRange(caret, caret); };
   const [y, m, d] = value.split('-').map(Number);
   const days = value ? daysUntil(value, now) : 0;
   return <>
     <span className="date-field">
-      <Input className="date-input" inputMode="numeric" placeholder="yyyy/mm/dd" aria-label="目标日期" value={text} onChange={e => edit(e.target.value)} />
-      <Button type="button" variant="outline" className="icon-action" aria-label="从日历选择" onClick={() => picker.current?.showPicker()}><CalendarDays size={18} /></Button>
-      <input ref={picker} type="date" className="date-picker" tabIndex={-1} aria-hidden min={localInput(now).slice(0, 10)} value={value} onChange={e => e.target.value && edit(e.target.value)} />
+      <span className="date-box">
+        <span className="date-mask" aria-hidden>{[...maskText(digits)].map((ch, at) => <span key={at} className={/\d/.test(ch) ? 'typed' : ''}>{ch}</span>)}</span>
+        <Input ref={input} className="date-input" inputMode="numeric" aria-label="目标日期（年/月/日）" value={maskText(digits)} onChange={e => edit(e.target.value)}
+          onFocus={() => requestAnimationFrame(parked)} onClick={e => { if (e.currentTarget.selectionStart === e.currentTarget.selectionEnd) parked(); }} />
+      </span>
+      <span className="calendar-pick" title="从日历选择"><CalendarDays size={18} />
+        <input type="date" className="calendar-native" aria-label="从日历选择" min={localInput(now).slice(0, 10)} value={value} onChange={e => e.target.value && edit(e.target.value)} />
+      </span>
     </span>
     {value && days >= 0 && <span className="muted">周{'日一二三四五六'[new Date(y, m - 1, d).getDay()]} · {days ? `还有 ${days} 天` : '就是今天'}</span>}
   </>;
