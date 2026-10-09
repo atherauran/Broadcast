@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfToday, localInput, endError, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { daysUntil, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfToday, localInput, endError, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -33,7 +33,7 @@ describe('display styles', () => {
   it('limits banners, boards and notes', () => {
     expect(validBanner('字'.repeat(80))).toBe(true); expect(validBanner('字'.repeat(81))).toBe(false); expect(validBanner(' ')).toBe(false);
     expect(validBoard('', ['', ' 明天穿校服 '])).toBe(true); expect(validBoard('', ['', ' '])).toBe(false);
-    expect(validBoard('', Array(13).fill('条'))).toBe(false); expect(validBoard('', ['字'.repeat(101)])).toBe(false);
+    expect(validBoard('', Array(13).fill('条'))).toBe(false); expect(validBoard('', ['字'.repeat(300)])).toBe(true); expect(validBoard('', ['字'.repeat(301)])).toBe(false);
     expect(validNote('字'.repeat(60))).toBe(true); expect(validNote('字'.repeat(61))).toBe(false);
   });
   it('defaults the end time to the end of the local day', () => {
@@ -44,6 +44,9 @@ describe('display styles', () => {
     expect(endError('', local)).toBe(''); expect(endError('2026-10-04T14:00', local)).toBe('结束时间已过');
     expect(endError('2026-10-12T14:00', local)).toBe('最多显示 7 天');
     expect(countdownError('duration', 25, '', local)).toBe(''); expect(countdownError('duration', 0, '', local)).not.toBe('');
+    expect(countdownError('days', 0, '', local, '')).toBe(''); expect(countdownError('days', 0, '', local, '2026-10-04')).toBe(''); expect(countdownError('days', 0, '', local, '2026-10-03')).toBe('日期已过'); expect(countdownError('days', 0, '', local, '2028-01-01')).not.toBe('');
+    expect(daysUntil('2026-10-06', local)).toBe(2);
+    expect(pastedLines('1. 带水杯\n2、交作业\r\n\n(3) 大扫除\n2024年开学')).toEqual(['带水杯', '交作业', '大扫除', '2024年开学']);
     expect(countdownError('until', 0, '13:00', local)).toBe('结束时间已过'); expect(countdownError('until', 0, '15:40', local)).toBe('');
   });
   it('formats the remaining countdown time', () => {
