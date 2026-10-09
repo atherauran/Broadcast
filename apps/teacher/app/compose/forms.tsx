@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useRef, useState, type ClipboardEvent } from 'react';
-import { Plus, X } from 'lucide-react';
+import { CalendarDays, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  fillTemplate, pastedLines, soonTime, templateBlanks } from '@/lib/domain';
+  daysUntil, fillTemplate, localInput, pastedLines, soonTime, templateBlanks } from '@/lib/domain';
 import { Choices, EmotionPicker, EndPicker, Option, TimeSelect, VoicePicker } from './fields';
 import type { AlertDraft, BannerDraft, BoardDraft, CountdownDraft, NoteDraft } from './drafts';
 
@@ -115,9 +115,10 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
   </>;
 }
 
-// A plain text field so the format reads yyyy/mm/dd in every browser; slashes are added as digits are typed.
-function DateInput({ value, onChange }: { value: string; onChange: (date: string) => void }) {
+// Typed as yyyy/mm/dd (slashes are added as digits are typed) or picked from the calendar button.
+function DateInput({ value, now, onChange }: { value: string; now: number; onChange: (date: string) => void }) {
   const [text, setText] = useState(value.replaceAll('-', '/'));
+  const picker = useRef<HTMLInputElement>(null);
   function edit(raw: string) {
     const digits = raw.replace(/\D/g, '').slice(0, 8);
     const shown = [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6)].filter(Boolean).join('/');
@@ -126,7 +127,16 @@ function DateInput({ value, onChange }: { value: string; onChange: (date: string
     setText(shown);
     onChange(digits.length === 8 && real.getFullYear() === y && real.getMonth() === m - 1 && real.getDate() === d ? shown.replaceAll('/', '-') : '');
   }
-  return <Input className="date-input" inputMode="numeric" placeholder="yyyy/mm/dd" aria-label="目标日期" value={text} onChange={e => edit(e.target.value)} />;
+  const [y, m, d] = value.split('-').map(Number);
+  const days = value ? daysUntil(value, now) : 0;
+  return <>
+    <span className="date-field">
+      <Input className="date-input" inputMode="numeric" placeholder="yyyy/mm/dd" aria-label="目标日期" value={text} onChange={e => edit(e.target.value)} />
+      <Button type="button" variant="outline" className="icon-action" aria-label="从日历选择" onClick={() => picker.current?.showPicker()}><CalendarDays size={18} /></Button>
+      <input ref={picker} type="date" className="date-picker" tabIndex={-1} aria-hidden min={localInput(now).slice(0, 10)} value={value} onChange={e => e.target.value && edit(e.target.value)} />
+    </span>
+    {value && days >= 0 && <span className="muted">周{'日一二三四五六'[new Date(y, m - 1, d).getDay()]} · {days ? `还有 ${days} 天` : '就是今天'}</span>}
+  </>;
 }
 
 export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft; now: number; onChange: (change: Partial<CountdownDraft>) => void }) {
@@ -137,7 +147,7 @@ export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft;
       <Choices legend="计时方式" value={draft.mode} options={[{ id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }, { id: 'days', label: '按天数' }]} onChange={mode => onChange({ mode, until: draft.until || soonTime(now) })} />
       {draft.mode === 'days'
         ? <Option label="目标日期"><div className="choice-row">
-          <DateInput value={draft.date} onChange={date => onChange({ date })} />
+          <DateInput value={draft.date} now={now} onChange={date => onChange({ date })} />
         </div></Option>
         : draft.mode === 'duration'
         ? <Option label="时长"><div className="choice-row">
