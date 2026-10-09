@@ -123,7 +123,7 @@ export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft;
       <Choices legend="计时方式" value={draft.mode} options={[{ id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }, { id: 'days', label: '按天数' }]} onChange={mode => onChange({ mode, until: draft.until || soonTime(now) })} />
       {draft.mode === 'days'
         ? <Option label="目标日期"><div className="choice-row">
-          <Input type="date" className="date-input" aria-label="目标日期" min={localInput(now).slice(0, 10)} value={draft.date} onChange={e => onChange({ date: e.target.value })} />
+          <Input type="date" className={'date-input ' + (draft.date ? '' : 'empty')} aria-label="目标日期" min={localInput(now).slice(0, 10)} value={draft.date} onChange={e => onChange({ date: e.target.value })} />
         </div></Option>
         : draft.mode === 'duration'
         ? <Option label="时长"><div className="choice-row">

@@ -1,5 +1,6 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
@@ -228,9 +229,7 @@ internal sealed class CountdownWindow : StateWindow
     private static readonly IBrush Done = new SolidColorBrush(Color.Parse("#F87171"));
     private readonly ServerClock _clock;
     private readonly DispatcherTimer _timer;
-    private readonly List<(TextBlock Digits, DateOnly Date)> _days = [];
-    private readonly StackPanel? _stack;
-    private DateTimeOffset? _end;
+    private DateTimeOffset _end;
     internal TextBlock Label { get; }
     internal TextBlock Digits { get; }
     internal Button? ShrinkButton { get; }
@@ -249,9 +248,9 @@ internal sealed class CountdownWindow : StateWindow
         {
             TransparencyLevelHint = [WindowTransparencyLevel.Transparent]; Background = Brushes.Transparent;
             SizeToContent = SizeToContent.WidthAndHeight;
-            _stack = new StackPanel(); _stack.Children.Add(Label); _stack.Children.Add(Digits);
+            var stack = new StackPanel(); stack.Children.Add(Label); stack.Children.Add(Digits);
             Content = new Border { Background = new SolidColorBrush(Color.Parse("#EB111827")), CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = _stack };
+                Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = stack };
             SizeChanged += (_, _) => PlaceInCorner(top: true);
             return;
         }
@@ -272,41 +271,18 @@ internal sealed class CountdownWindow : StateWindow
         Content = new Grid { Children = { new Border { Padding = new Thickness(64, 48), Child = layout }, ShrinkButton } };
     }
 
-    // The corner shows the timed countdown (if any) with the day counts stacked beneath it; fullscreen shows only the timer.
-    public void Present(DisplayItem? timed, IReadOnlyList<DisplayItem>? days = null)
+    public void Present(DisplayItem countdown)
     {
-        _end = timed?.EndsAt;
-        Label.Text = timed?.Content.Label ?? ""; Label.IsVisible = Label.Text.Length > 0;
-        Digits.IsVisible = timed is not null;
-        _days.Clear();
-        if (_stack is not null)
-        {
-            while (_stack.Children.Count > 2) _stack.Children.RemoveAt(2);
-            foreach (var day in days ?? [])
-            {
-                if (!DateOnly.TryParse(day.Content.Date, out var date)) continue;
-                var name = Text(day.Content.Label ?? "", 20, "#D6DEE9", FontWeight.SemiBold); name.HorizontalAlignment = HorizontalAlignment.Center;
-                name.IsVisible = !string.IsNullOrEmpty(name.Text);
-                if (_stack.Children.Count > 2 || timed is not null) name.Margin = new Thickness(0, 10, 0, 0);
-                var digits = new TextBlock { FontFamily = Digits.FontFamily, FontSize = timed is null ? 64 : 44, FontWeight = FontWeight.Bold,
-                    Foreground = Running, HorizontalAlignment = HorizontalAlignment.Center };
-                _stack.Children.Add(name); _stack.Children.Add(digits); _days.Add((digits, date));
-            }
-        }
+        _end = countdown.EndsAt;
+        Label.Text = countdown.Content.Label ?? ""; Label.IsVisible = Label.Text.Length > 0;
         Tick(); _timer.Start();
     }
 
     internal void Tick()
     {
-        foreach (var (digits, date) in _days) digits.Text = Days(date, _clock.Now);
-        if (_end is not { } end) return;
-        var left = end - _clock.Now;
+        var left = _end - _clock.Now;
         Digits.Text = Format(left); Digits.Foreground = left > TimeSpan.Zero ? Running : Done;
     }
-
-    // Calendar days on the PC's local date, so it flips at midnight rather than 24 hours after the last change.
-    public static string Days(DateOnly target, DateTimeOffset now) =>
-        target.DayNumber - DateOnly.FromDateTime(now.LocalDateTime).DayNumber is var days and > 0 ? $"{days} 天" : "今天";
 
     public static string Format(TimeSpan left)
     {
@@ -315,13 +291,70 @@ internal sealed class CountdownWindow : StateWindow
     }
 }
 
+// Long-term day counts live on the desktop like notes: an ordinary window that other windows can cover.
+internal sealed class DayCountdownWindow : StateWindow
+{
+    private readonly ServerClock _clock;
+    private readonly DispatcherTimer _timer;
+    private readonly StackPanel _rows = new() { Spacing = 14 };
+    private readonly List<(TextBlock Digits, DateOnly Date)> _days = [];
+    internal StackPanel Rows => _rows;
+
+    public DayCountdownWindow(ServerClock clock)
+    {
+        _clock = clock;
+        SystemDecorations = SystemDecorations.None; ShowInTaskbar = false; Topmost = false; CanResize = false;
+        TransparencyLevelHint = [WindowTransparencyLevel.Transparent]; Background = Brushes.Transparent;
+        SizeToContent = SizeToContent.WidthAndHeight;
+        Content = new Border { Background = new SolidColorBrush(Color.Parse("#EB111827")), CornerRadius = new CornerRadius(18),
+            Padding = new Thickness(28, 14), MinWidth = 240, Child = _rows };
+        SizeChanged += (_, _) => PlaceInCorner(top: true);
+        _timer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Normal, (_, _) => Tick());
+        Closed += (_, _) => _timer.Stop();
+    }
+
+    public void Present(IReadOnlyList<DisplayItem> days)
+    {
+        _rows.Children.Clear(); _days.Clear();
+        foreach (var day in days)
+        {
+            if (!DateOnly.TryParse(day.Content.Date, out var date)) continue;
+            var name = Text(day.Content.Label ?? "", 20, "#D6DEE9", FontWeight.SemiBold); name.HorizontalAlignment = HorizontalAlignment.Center;
+            name.IsVisible = !string.IsNullOrEmpty(name.Text);
+            var digits = new TextBlock { FontFamily = new FontFamily("Consolas, Cascadia Mono, Microsoft YaHei"), FontSize = days.Count > 1 ? 48 : 64,
+                FontWeight = FontWeight.Bold, Foreground = Brushes.White, HorizontalAlignment = HorizontalAlignment.Center };
+            var row = new StackPanel(); row.Children.Add(name); row.Children.Add(digits);
+            _rows.Children.Add(row); _days.Add((digits, date));
+        }
+        Tick(); _timer.Start();
+    }
+
+    internal void Tick()
+    {
+        foreach (var (digits, date) in _days) ShowDays(digits, Days(date, _clock.Now));
+    }
+
+    // The unit is set smaller than the number: its CJK fallback font would otherwise dwarf the digits.
+    private static void ShowDays(TextBlock block, string text)
+    {
+        if (block.Tag as string == text) return;
+        block.Tag = text; block.Inlines!.Clear();
+        if (text.EndsWith(" 天")) { block.Inlines.Add(new Run(text[..^2])); block.Inlines.Add(new Run(" 天") { FontSize = block.FontSize * .7 }); }
+        else block.Inlines.Add(new Run(text));
+    }
+
+    // Calendar days on the PC's local date, so it flips at midnight rather than 24 hours after the last change.
+    public static string Days(DateOnly target, DateTimeOffset now) =>
+        target.DayNumber - DateOnly.FromDateTime(now.LocalDateTime).DayNumber is var days and > 0 ? $"{days} 天" : "今天";
+}
+
 internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) : IStateDisplay
 {
     private BoardWindow? _board;
     private NotesWindow? _notes;
     private CountdownWindow? _countdown;
+    private DayCountdownWindow? _dayCounts;
     private DisplayItem? _timer;
-    private DisplayItem[] _days = [];
     private Guid _shrunk;
 
     public async Task ApplyAsync(IReadOnlyList<DisplayItem> visible) => await Dispatcher.UIThread.InvokeAsync(() =>
@@ -330,9 +363,10 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) :
         var notes = visible.Where(i => i.Kind == "note").OrderBy(i => i.StartsAt).ToArray();
         var countdowns = visible.Where(i => i.Kind == "countdown").ToArray();
         var timed = countdowns.Where(i => i.Content.Date is null).MaxBy(i => i.StartsAt);
-        _days = countdowns.Where(i => i.Content.Date is not null).OrderBy(i => i.EndsAt).ToArray();
+        var days = countdowns.Where(i => i.Content.Date is not null).OrderBy(i => i.EndsAt).ToArray();
         Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards), WindowLayer.ShowBehindLesson);
         Sync(ref _notes, notes.Length > 0, () => new NotesWindow(), w => w.Present(notes), WindowLayer.ShowBehindLesson);
+        Sync(ref _dayCounts, days.Length > 0, () => new DayCountdownWindow(clock), w => w.Present(days), WindowLayer.ShowBehindLesson);
         _timer = timed; ShowCountdown();
     });
 
@@ -341,7 +375,7 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) :
     {
         var fullscreen = _timer is { Content.Fullscreen: true } && _timer.Id != _shrunk;
         if (_countdown is not null && _countdown.IsFullscreen != fullscreen) { _countdown.Dismiss(); _countdown = null; }
-        Sync(ref _countdown, _timer is not null || _days.Length > 0, () => new CountdownWindow(clock, fullscreen ? Shrink : null), w => w.Present(_timer, _days), w =>
+        Sync(ref _countdown, _timer is not null, () => new CountdownWindow(clock, fullscreen ? Shrink : null), w => w.Present(_timer!), w =>
         {
             WindowLayer.ShowPassive(w);
             // A fullscreen broadcast already on screen stays above the timer.

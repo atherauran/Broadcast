@@ -113,25 +113,19 @@ using (var frame = countdown.CaptureRenderedFrame()) frame?.Save(Path.Combine(ou
 Console.WriteLine("PASS countdown: topmost, label and digits");
 countdown.Dismiss();
 
-countdown = new CountdownWindow(clock);
-countdown.Present(null, [Item("countdown", new DisplayContent(Label: "距离期末", Date: DateOnly.FromDateTime(clock.Now.LocalDateTime).AddDays(23).ToString("yyyy-MM-dd"))) with { EndsAt = clock.Now.AddDays(24) }]);
-countdown.Show(); Dispatcher.UIThread.RunJobs();
-if (!countdown.Topmost || countdown.Digits.Parent is not StackPanel { Children.Count: 4 } days || ((TextBlock)days.Children[2]).Text != "距离期末" || ((TextBlock)days.Children[3]).Text != "23 天") throw new Exception("countdown-days: must show the day count in the corner");
-if (CountdownWindow.Days(DateOnly.FromDateTime(clock.Now.LocalDateTime), clock.Now) != "今天") throw new Exception("countdown-days: the day itself must read 今天");
-using (var frame = countdown.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "countdown-days.png"));
-countdown.Dismiss();
-countdown = new CountdownWindow(clock);
 string DayText(int ahead) => DateOnly.FromDateTime(clock.Now.LocalDateTime).AddDays(ahead).ToString("yyyy-MM-dd");
-countdown.Present(Item("countdown", new DisplayContent(Label: "距离下课")) with { EndsAt = clock.Now.AddMinutes(25).AddSeconds(-0.5) },
-    [Item("countdown", new DisplayContent(Label: "距离期末", Date: DayText(23))) with { EndsAt = clock.Now.AddDays(24) },
-     Item("countdown", new DisplayContent(Label: "距离中考", Date: DayText(90))) with { EndsAt = clock.Now.AddDays(91) }]);
-countdown.Show(); Dispatcher.UIThread.RunJobs();
-if (countdown.Digits.Text != "25:00" || countdown.Digits.Parent is not StackPanel { Children.Count: 6 } stack
-    || ((TextBlock)stack.Children[5]).Text != "90 天") throw new Exception("countdown-stack: timer and day counts must stack in one corner window");
-using (var frame = countdown.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "countdown-stack.png"));
-Console.WriteLine("PASS countdown-stack: timer and two day counts share the corner");
-Console.WriteLine("PASS countdown-days: corner timer counts calendar days");
-countdown.Dismiss();
+string Shown(TextBlock block) => string.Concat(block.Inlines!.OfType<Avalonia.Controls.Documents.Run>().Select(run => run.Text));
+var daily = new DayCountdownWindow(clock);
+daily.Present([Item("countdown", new DisplayContent(Label: "距离期末", Date: DayText(23))) with { EndsAt = clock.Now.AddDays(24) },
+    Item("countdown", new DisplayContent(Label: "距离中考", Date: DayText(90))) with { EndsAt = clock.Now.AddDays(91) }]);
+daily.Show(); Dispatcher.UIThread.RunJobs();
+if (daily.Topmost || daily.ShowInTaskbar || daily.Rows.Children.Count != 2
+    || Shown((TextBlock)((StackPanel)daily.Rows.Children[0]).Children[1]) != "23 天" || Shown((TextBlock)((StackPanel)daily.Rows.Children[1]).Children[1]) != "90 天")
+    throw new Exception("countdown-days: day counts must stack in a non-topmost desktop window");
+if (DayCountdownWindow.Days(DateOnly.FromDateTime(clock.Now.LocalDateTime), clock.Now) != "今天") throw new Exception("countdown-days: the day itself must read 今天");
+using (var frame = daily.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "countdown-days.png"));
+Console.WriteLine("PASS countdown-days: stacked day counts, not topmost");
+daily.Dismiss();
 
 var shrunk = false;
 var full = new CountdownWindow(clock, () => shrunk = true) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
