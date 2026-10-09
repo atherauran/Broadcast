@@ -141,7 +141,7 @@ function DateInput({ value, now, onChange }: { value: string; now: number; onCha
   return <>
     <span className="date-field">
       <span className="date-box">
-        <span className="date-mask" aria-hidden>{[...maskText(digits)].map((ch, at) => <span key={at} className={/\d/.test(ch) ? 'typed' : ''}>{ch}</span>)}</span>
+        <span className="date-mask" aria-hidden>{maskText(digits).split('').map((ch, at) => <span key={at} className={/\d/.test(ch) ? 'typed' : ''}>{ch}</span>)}</span>
         <Input ref={input} className="date-input" inputMode="numeric" aria-label="目标日期（年/月/日）" value={maskText(digits)} onChange={e => edit(e.target.value)}
           onFocus={() => requestAnimationFrame(parked)} onClick={e => { if (e.currentTarget.selectionStart === e.currentTarget.selectionEnd) parked(); }} />
       </span>
