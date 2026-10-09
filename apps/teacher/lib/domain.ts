@@ -52,7 +52,7 @@ export const KINDS: { id: Kind; label: string }[] = [
 ];
 export const BANNER_LIMIT = 80;
 export const BOARD_ENTRIES = 12;
-export const BOARD_ENTRY_LIMIT = 100;
+export const BOARD_ENTRY_LIMIT = 300;
 export const NOTE_LIMIT = 60;
 export type NoteColor = 'yellow' | 'blue' | 'green' | 'pink';
 export const NOTE_COLORS: { id: NoteColor; label: string }[] = [
@@ -61,7 +61,7 @@ export const NOTE_COLORS: { id: NoteColor; label: string }[] = [
 export const COUNTDOWN_MINUTES = [5, 10, 15, 25, 45];
 export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number }
 export interface NoteContent { text: string; color: NoteColor }
-export interface CountdownContent { label: string; fullscreen: boolean }
+export interface CountdownContent { label: string; fullscreen: boolean; date?: string }
 export type DisplayItem = {
   id: string; request_id: string; classroom_id: string; starts_at: string; ends_at: string;
   teacher_name: string; created_at: string;
@@ -126,6 +126,10 @@ export function validBanner(body: string): boolean {
 export function boardEntries(entries: string[]): string[] {
   return entries.map(entry => entry.trim()).filter(Boolean);
 }
+// Splits pasted text into announcement lines, dropping blank lines and "1." / "2、" / "(3)" style numbering.
+export function pastedLines(text: string): string[] {
+  return text.split(/\r?\n/).map(line => line.replace(/^\s*[(（]?\d+\s*[.、)）．]\s*/, '').trim()).filter(Boolean);
+}
 export function validBoard(title: string, entries: string[]): boolean {
   const list = boardEntries(entries);
   return chars(title) <= 30 && list.length > 0 && list.length <= BOARD_ENTRIES && list.every(entry => chars(entry) <= BOARD_ENTRY_LIMIT);
@@ -159,7 +163,19 @@ export function endError(endAt: string, now: number): string {
   if (end > now + 7 * 86_400_000) return '最多显示 7 天';
   return '';
 }
-export function countdownError(mode: 'duration' | 'until', minutes: number, until: string, now: number): string {
+export const COUNTDOWN_DAYS = 366;
+// Whole calendar days from today to a "YYYY-MM-DD" date.
+export function daysUntil(date: string, now: number): number {
+  const [y, m, d] = date.split('-').map(Number);
+  const today = new Date(now);
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 86_400_000);
+}
+export function countdownError(mode: 'duration' | 'until' | 'days', minutes: number, until: string, now: number, date = ''): string {
+  if (mode === 'days') {
+    if (!date) return '';
+    const days = daysUntil(date, now);
+    return days < 0 ? '日期已过' : days > COUNTDOWN_DAYS ? `最多倒数 ${COUNTDOWN_DAYS} 天` : '';
+  }
   if (mode === 'duration') return Number.isInteger(minutes) && minutes >= 1 && minutes <= 720 ? '' : '请填写 1–720 分钟';
   const end = todayAt(now, until);
   if (end <= now) return '结束时间已过';

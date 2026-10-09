@@ -1,17 +1,17 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  fillTemplate, soonTime, templateBlanks } from '@/lib/domain';
+  fillTemplate, localInput, pastedLines, soonTime, templateBlanks } from '@/lib/domain';
 import { Choices, EmotionPicker, EndPicker, Option, TimeSelect, VoicePicker } from './fields';
 import type { AlertDraft, BannerDraft, BoardDraft, CountdownDraft, NoteDraft } from './drafts';
 
 const count = (value: string) => Array.from(value.trim()).length;
-function Heading({ title, length, limit }: { title: string; length?: number; limit?: number }) {
-  return <div className="section-heading"><h2>{title}</h2>{limit !== undefined && <span className={'character-count ' + (length! > limit ? 'error-text' : '')}>{length} / {limit}</span>}</div>;
+function Heading({ title, hint, length, limit }: { title: string; hint?: string; length?: number; limit?: number }) {
+  return <div className="section-heading"><div className="heading-title"><h2>{title}</h2>{hint && <span className="heading-hint">{hint}</span>}</div>{limit !== undefined && <span className={'character-count ' + (length! > limit ? 'error-text' : '')}>{length} / {limit}</span>}</div>;
 }
 
 export function AlertForm({ draft, onChange, onError }: { draft: AlertDraft; onChange: (change: Partial<AlertDraft>) => void; onError: (message: string) => void }) {
@@ -62,12 +62,35 @@ export function BannerForm({ draft, onChange }: { draft: BannerDraft; onChange: 
 
 export function BoardForm({ draft, now, onChange, onError }: { draft: BoardDraft; now: number; onChange: (change: Partial<BoardDraft>) => void; onError: (message: string) => void }) {
   const setEntry = (index: number, value: string) => onChange({ entries: draft.entries.map((entry, at) => at === index ? value : entry) });
+  const list = useRef<HTMLOListElement>(null);
+  const focusAt = useRef<number | null>(null);
+  function paste(index: number, e: ClipboardEvent<HTMLInputElement>) {
+    const text = e.clipboardData.getData('text');
+    if (!/[\r\n]/.test(text)) return;
+    const lines = pastedLines(text);
+    if (!lines.length) return;
+    e.preventDefault();
+    const { value, selectionStart, selectionEnd } = e.currentTarget;
+    lines[0] = value.slice(0, selectionStart ?? 0) + lines[0];
+    lines[lines.length - 1] += value.slice(selectionEnd ?? 0);
+    const entries = draft.entries.flatMap((entry, at) => at === index ? lines : [entry]);
+    if (entries.length > BOARD_ENTRIES) onError(`最多 ${BOARD_ENTRIES} 条公告，多余内容已忽略`);
+    focusAt.current = Math.min(index + lines.length, entries.length, BOARD_ENTRIES) - 1;
+    onChange({ entries: entries.slice(0, BOARD_ENTRIES) });
+  }
+  useEffect(() => {
+    if (focusAt.current === null) return;
+    const input = list.current?.querySelectorAll('input')[focusAt.current];
+    focusAt.current = null;
+    input?.focus();
+    input?.setSelectionRange(input.value.length, input.value.length);
+  }, [draft.entries]);
   return <>
-    <Heading title="公告内容" />
+    <Heading title="公告内容" hint="多行可直接粘贴" />
     <Input className="title-input" aria-label="公告标题" placeholder="标题（默认为“公告”）" maxLength={30} value={draft.title} onChange={e => onChange({ title: e.target.value })} />
-    <ol className="entry-list">{draft.entries.map((entry, index) => <li key={index} className="entry-row">
+    <ol className="entry-list" ref={list}>{draft.entries.map((entry, index) => <li key={index} className="entry-row">
       <span className="entry-number">{index + 1}</span>
-      <Input aria-label={`第 ${index + 1} 条`} placeholder="公告内容" value={entry} onChange={e => setEntry(index, e.target.value)} className={count(entry) > BOARD_ENTRY_LIMIT ? 'invalid' : ''} />
+      <Input aria-label={`第 ${index + 1} 条`} placeholder="公告内容" value={entry} onChange={e => setEntry(index, e.target.value)} onPaste={e => paste(index, e)} className={count(entry) > BOARD_ENTRY_LIMIT ? 'invalid' : ''} />
       {draft.entries.length > 1 && <Button type="button" variant="ghost" className="icon-action" aria-label={`删除第 ${index + 1} 条`} onClick={() => onChange({ entries: draft.entries.filter((_, at) => at !== index) })}><X size={18} /></Button>}
     </li>)}</ol>
     {draft.entries.length < BOARD_ENTRIES && <Button type="button" variant="outline" className="action add-entry" onClick={() => onChange({ entries: [...draft.entries, ''] })}><Plus size={17} />添加一条</Button>}
@@ -95,10 +118,14 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
 export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft; now: number; onChange: (change: Partial<CountdownDraft>) => void }) {
   return <>
     <Heading title="倒计时" />
-    <Input className="title-input" aria-label="倒计时名称" placeholder="名称，如“距离下课”" maxLength={20} value={draft.label} onChange={e => onChange({ label: e.target.value })} />
+    <Input className="title-input" aria-label="倒计时名称" placeholder={draft.mode === 'days' ? '名称，如“距离期末”' : '名称，如“距离下课”'} maxLength={20} value={draft.label} onChange={e => onChange({ label: e.target.value })} />
     <div className="broadcast-options">
-      <Choices legend="计时方式" value={draft.mode} options={[{ id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }]} onChange={mode => onChange({ mode, until: draft.until || soonTime(now) })} />
-      {draft.mode === 'duration'
+      <Choices legend="计时方式" value={draft.mode} options={[{ id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }, { id: 'days', label: '按天数' }]} onChange={mode => onChange({ mode, until: draft.until || soonTime(now) })} />
+      {draft.mode === 'days'
+        ? <Option label="目标日期"><div className="choice-row">
+          <Input type="date" className="date-input" aria-label="目标日期" min={localInput(now).slice(0, 10)} value={draft.date} onChange={e => onChange({ date: e.target.value })} />
+        </div></Option>
+        : draft.mode === 'duration'
         ? <Option label="时长"><div className="choice-row">
           {COUNTDOWN_MINUTES.map(minutes => <button type="button" key={minutes} className={draft.minutes === minutes ? 'active' : ''} aria-pressed={draft.minutes === minutes} onClick={() => onChange({ minutes })}>{minutes} 分钟</button>)}
           <span className="minutes-input"><Input type="number" inputMode="numeric" min={1} max={720} aria-label="自定义分钟" value={Number.isNaN(draft.minutes) ? '' : draft.minutes} onChange={e => onChange({ minutes: e.target.valueAsNumber })} />分钟</span>
@@ -106,7 +133,7 @@ export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft;
         : <Option label="结束时间"><div className="choice-row">
           <TimeSelect value={draft.until} label="倒计时结束时间" onChange={until => onChange({ until })} />
         </div></Option>}
-      <Choices legend="显示方式" value={draft.fullscreen ? 'fullscreen' : 'corner'} options={[{ id: 'corner', label: '右上角' }, { id: 'fullscreen', label: '全屏' }]} onChange={value => onChange({ fullscreen: value === 'fullscreen' })} />
+      {draft.mode !== 'days' && <Choices legend="显示方式" value={draft.fullscreen ? 'fullscreen' : 'corner'} options={[{ id: 'corner', label: '右上角' }, { id: 'fullscreen', label: '全屏' }]} onChange={value => onChange({ fullscreen: value === 'fullscreen' })} />}
     </div>
   </>;
 }

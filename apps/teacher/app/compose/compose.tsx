@@ -21,8 +21,8 @@ export function draftCheck(kind: Kind, drafts: Drafts, now: number): { ok: boole
     return { ok: validNote(drafts.note.text) && !hint, hint };
   }
   const c = drafts.countdown;
-  const hint = countdownError(c.mode, c.minutes, c.until, now);
-  return { ok: !hint && Array.from(c.label.trim()).length <= 20, hint };
+  const hint = countdownError(c.mode, c.minutes, c.until, now, c.date);
+  return { ok: !hint && (c.mode !== 'days' || !!c.date) && Array.from(c.label.trim()).length <= 20, hint };
 }
 
 export function Compose({ kind, setKind, rooms, known, now, selected, setSelected, drafts, patch, ready, busy, onSubmit, onError }: {

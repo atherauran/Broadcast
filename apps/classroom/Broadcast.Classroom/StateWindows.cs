@@ -229,6 +229,7 @@ internal sealed class CountdownWindow : StateWindow
     private readonly ServerClock _clock;
     private readonly DispatcherTimer _timer;
     private DateTimeOffset _end;
+    private DateOnly? _date;
     internal TextBlock Label { get; }
     internal TextBlock Digits { get; }
     internal Button? ShrinkButton { get; }
@@ -272,16 +273,21 @@ internal sealed class CountdownWindow : StateWindow
 
     public void Present(DisplayItem countdown)
     {
-        _end = countdown.EndsAt;
+        _end = countdown.EndsAt; _date = DateOnly.TryParse(countdown.Content.Date, out var date) ? date : null;
         Label.Text = countdown.Content.Label ?? ""; Label.IsVisible = Label.Text.Length > 0;
         Tick(); _timer.Start();
     }
 
     internal void Tick()
     {
+        if (_date is { } date) { Digits.Text = Days(date, _clock.Now); Digits.Foreground = Running; return; }
         var left = _end - _clock.Now;
         Digits.Text = Format(left); Digits.Foreground = left > TimeSpan.Zero ? Running : Done;
     }
+
+    // Calendar days on the PC's local date, so it flips at midnight rather than 24 hours after the last change.
+    public static string Days(DateOnly target, DateTimeOffset now) =>
+        target.DayNumber - DateOnly.FromDateTime(now.LocalDateTime).DayNumber is var days and > 0 ? $"{days} 天" : "今天";
 
     public static string Format(TimeSpan left)
     {
@@ -302,7 +308,8 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) :
     {
         var boards = visible.Where(i => i.Kind == "board").OrderByDescending(i => i.StartsAt).ToArray();
         var notes = visible.Where(i => i.Kind == "note").OrderBy(i => i.StartsAt).ToArray();
-        var countdown = visible.Where(i => i.Kind == "countdown").MaxBy(i => i.StartsAt);
+        // A timed countdown takes the corner from a day count until it ends.
+        var countdown = visible.Where(i => i.Kind == "countdown").OrderBy(i => i.Content.Date is not null).ThenByDescending(i => i.StartsAt).FirstOrDefault();
         Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards), WindowLayer.ShowBehindLesson);
         Sync(ref _notes, notes.Length > 0, () => new NotesWindow(), w => w.Present(notes), WindowLayer.ShowBehindLesson);
         _timer = countdown; ShowCountdown();

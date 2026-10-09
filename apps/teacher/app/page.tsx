@@ -181,12 +181,16 @@ export default function App() {
       } else if (kind === 'board') {
         const b = drafts.board;
         await createDisplay('board', { title: b.title.trim(), entries: boardEntries(b.entries), speak: b.speak, voice_type: b.voiceType }, endsAt(b.endAt, now));
+        patch('board', { title: '', entries: [''] });
       } else if (kind === 'note') {
         await createDisplay('note', { text: drafts.note.text.trim(), color: drafts.note.color }, endsAt(drafts.note.endAt, now));
+        patch('note', { text: '' });
       } else {
         const c = drafts.countdown;
-        await createDisplay('countdown', { label: c.label.trim(), fullscreen: c.fullscreen }, c.mode === 'until'
+        if (c.mode === 'days') await createDisplay('countdown', { label: c.label.trim(), fullscreen: false, date: c.date }, { p_ends_at: new Date(`${c.date}T23:59:59`).toISOString() });
+        else await createDisplay('countdown', { label: c.label.trim(), fullscreen: c.fullscreen }, c.mode === 'until'
           ? { p_ends_at: new Date(todayAt(now, c.until)).toISOString() } : { p_duration_seconds: c.minutes * 60 });
+        patch('countdown', { label: '' });
       }
     });
   }

@@ -8,10 +8,9 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 
 | action | Other request parameters | Result |
 | --- | --- | --- |
-| `send` | `request_id`, `body`, `classrooms: string[]`, `teacher_name`, `repeat_count` (0–4), `auto_close`, `emotion`, `voice_type`, nullable `source_id`, `style` (`fullscreen` default, or `banner`), `banner_position` (`top` default, or `bottom`) | `id` |
 | `register-device` | `classroom_id`, `name` | Supabase `session`, `classroom_id`, and the device's fixed login `credential` (`id`, `email`, `password`) |
 
-Both actions are admin-only. The teacher app now sends through the `create_broadcast` RPC directly; `send` stays only for teacher pages that have not been updated yet. A banner must have a body of at most 80 characters, `repeat_count` 0 and `auto_close` true. Requests are deduplicated by `request_id`: a retry of the same logical request must keep its ID, and an explicit resend uses a new one. The Edge Function sends only text and delivery info; it never generates, stores or returns audio.
+`register-device` is admin-only. Broadcasts are sent through the `create_broadcast` RPC below: a banner must have a body of at most 80 characters, `repeat_count` 0 and `auto_close` true, and requests are deduplicated by `p_id`, so a retry of the same logical request must keep its ID and an explicit resend uses a new one. Neither the Edge Function nor the database generates, stores or returns audio.
 
 ## Database RPCs
 
@@ -30,7 +29,7 @@ Both actions are admin-only. The teacher app now sends through the `create_broad
 | `display_overview` | none | `{server_now, items}`: every live item in all classes; admin |
 | `display_state` | none | `{server_now, items}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name` |
 
-`create_broadcast` is an admin RPC called by the teacher app (and by the `send` function) with `p_id`, `p_body`, `p_classrooms`, `p_source`, `p_teacher_name`, `p_repeat_count` (0–4), `p_auto_close`, `p_emotion`, `p_voice_type`, `p_style` and `p_banner_position`. It validates every field, is idempotent per `p_id`, and writes the broadcast and all class deliveries in one transaction.
+`create_broadcast` is an admin RPC called by the teacher app with `p_id`, `p_body`, `p_classrooms`, `p_source`, `p_teacher_name`, `p_repeat_count` (0–4), `p_auto_close`, `p_emotion`, `p_voice_type`, `p_style` and `p_banner_position`. It validates every field, is idempotent per `p_id`, and writes the broadcast and all class deliveries in one transaction.
 
 Each item in `pending_broadcasts.items` has `delivery_id`, `broadcast_id`, `body`, `teacher_name`, `repeat_count`, `auto_close`, `emotion`, `voice_type`, `style`, `banner_position`, `created_at` and `expires_at`. The query takes no device ID; the server identifies the device from its JWT. The classroom client calls Tencent Cloud TTS directly with `body` and `voice_type` and plays the WAV locally, reusing the same WAV when `repeat_count` is above 1.
 
@@ -43,11 +42,11 @@ Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`,
 `display_items` holds one row per class for each board, note or countdown: `request_id`, `classroom_id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, `created_by`, `created_at` and nullable `removed_at`. Devices may select only their current class's rows (removed rows included, so Realtime delivers removals). Every write goes through the admin RPCs above.
 
 `content` by kind:
-- board: `{title, entries, speak, voice_type}`, with title at most 30 characters (default 公告) and 1–12 entries of at most 100 characters each.
+- board: `{title, entries, speak, voice_type}`, with title at most 30 characters (default 公告) and 1–12 entries of at most 300 characters each.
 - note: `{text, color}`, with text 1–60 characters and color `yellow`, `blue`, `green` or `pink`.
-- countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false.
+- countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false. A day count adds `date` (`YYYY-MM-DD`, `fullscreen` must be false): the device shows the calendar days left on its local date, "今天" on the day itself.
 
-Every item starts when it is created (`starts_at` is the server time); the end must fall in the future and within 7 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown in its classes. A note is refused when a target class already shows 4 notes. Device queries keep a countdown for 5 seconds past `ends_at`.
+Every item starts when it is created (`starts_at` is the server time); the end must fall in the future and within 7 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 7-day and 12-hour limits, and is replaced only by another day count; a timed countdown takes the corner while it runs. A note is refused when a target class already shows 4 notes. Device queries keep a countdown for 5 seconds past `ends_at`.
 
 ## Realtime and presence
 

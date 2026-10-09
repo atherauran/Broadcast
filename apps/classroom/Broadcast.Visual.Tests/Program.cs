@@ -113,6 +113,15 @@ using (var frame = countdown.CaptureRenderedFrame()) frame?.Save(Path.Combine(ou
 Console.WriteLine("PASS countdown: topmost, label and digits");
 countdown.Dismiss();
 
+countdown = new CountdownWindow(clock);
+countdown.Present(Item("countdown", new DisplayContent(Label: "距离期末", Date: DateOnly.FromDateTime(clock.Now.LocalDateTime).AddDays(23).ToString("yyyy-MM-dd"))) with { EndsAt = clock.Now.AddDays(24) });
+countdown.Show(); Dispatcher.UIThread.RunJobs();
+if (!countdown.Topmost || countdown.Digits.Text != "23 天" || countdown.Label.Text != "距离期末") throw new Exception("countdown-days: must show the day count in the corner");
+if (CountdownWindow.Days(DateOnly.FromDateTime(clock.Now.LocalDateTime), clock.Now) != "今天") throw new Exception("countdown-days: the day itself must read 今天");
+using (var frame = countdown.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "countdown-days.png"));
+Console.WriteLine("PASS countdown-days: corner timer counts calendar days");
+countdown.Dismiss();
+
 var shrunk = false;
 var full = new CountdownWindow(clock, () => shrunk = true) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
 full.Present(Item("countdown", new DisplayContent(Label: "距离考试结束", Fullscreen: true)) with { EndsAt = clock.Now.AddHours(1).AddMinutes(2).AddSeconds(4.5) });

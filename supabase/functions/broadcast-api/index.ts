@@ -1,6 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { uuid, validateAutoClose, validateBanner, validateBannerPosition, validateBody, validateEmotion, validateRepeatCount,
-  validateStyle, validateTargets, validateTeacherName, validateVoiceType } from '../_shared/domain.ts';
+import { validateTargets } from '../_shared/domain.ts';
 
 const url = Deno.env.get('SUPABASE_URL')!;
 const key = Deno.env.get('SUPABASE_ANON_KEY')!;
@@ -22,38 +21,8 @@ Deno.serve(async (request) => {
     const { data: { user }, error: authError } = await service.auth.getUser(token);
     if (authError || !user) return reply({ error: '登录已失效，请重新登录' }, 401);
     const admin = user.app_metadata.role === 'admin';
-    const client = createClient(url, key, { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false, autoRefreshToken: false } });
     const input = await request.json();
     if (!admin) return reply({ error: '需要管理员权限' }, 403);
-    if (input.action === 'send') {
-      const id = uuid(input.request_id);
-      const body = validateBody(input.body);
-      const classrooms = validateTargets(input.classrooms);
-      const teacherName = validateTeacherName(input.teacher_name);
-      const repeatCount = validateRepeatCount(input.repeat_count);
-      const autoClose = validateAutoClose(input.auto_close);
-      const emotion = validateEmotion(input.emotion);
-      const voiceType = validateVoiceType(input.voice_type);
-      const style = validateStyle(input.style);
-      const bannerPosition = validateBannerPosition(input.banner_position);
-      if (style === 'banner') validateBanner(body, repeatCount, autoClose);
-      const source = input.source_id ? uuid(input.source_id) : null;
-      const existing = await client.from('broadcasts').select('id,body,teacher_name,repeat_count,auto_close,emotion,voice_type,source_id,style,banner_position').eq('id', id).maybeSingle();
-      if (existing.error) throw existing.error;
-      if (existing.data) {
-        if (existing.data.body !== body || existing.data.teacher_name !== teacherName || existing.data.repeat_count !== repeatCount ||
-          existing.data.auto_close !== autoClose || existing.data.emotion !== emotion || existing.data.voice_type !== voiceType || existing.data.source_id !== source ||
-          existing.data.style !== style || existing.data.banner_position !== bannerPosition) {
-          throw new Error('请求编号冲突');
-        }
-        return reply({ id });
-      }
-      const created = await client.rpc('create_broadcast', { p_id: id, p_body: body, p_classrooms: classrooms,
-        p_source: source, p_teacher_name: teacherName, p_repeat_count: repeatCount, p_auto_close: autoClose,
-        p_emotion: emotion, p_voice_type: voiceType, p_style: style, p_banner_position: bannerPosition });
-      if (created.error) throw created.error;
-      return reply({ id: created.data });
-    }
     if (input.action === 'register-device') {
       const classroom = validateTargets([input.classroom_id])[0];
       const name = typeof input.name === 'string' ? input.name.trim().slice(0, 100) : '';

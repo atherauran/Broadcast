@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, ClipboardList, StickyNote, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { clockText, isOnline, remaining, type Classroom, type DisplayItem } from '@/lib/domain';
+import { clockText, daysUntil, isOnline, remaining, type Classroom, type DisplayItem } from '@/lib/domain';
 import { roomStatus } from './class-picker';
 
 const icons = { board: ClipboardList, note: StickyNote, countdown: Timer };
@@ -10,7 +10,9 @@ const kindLabel = { board: '公告板', note: '便签', countdown: '倒计时' }
 function summary(item: DisplayItem, now: number): string {
   if (item.kind === 'board') return `${item.content.title} · ${item.content.entries.length} 条`;
   if (item.kind === 'note') return item.content.text;
-  return `${item.content.label || '倒计时'} · 剩余 ${remaining(Date.parse(item.ends_at) - now)}`;
+  const label = item.content.label || '倒计时';
+  if (item.content.date) { const days = daysUntil(item.content.date, now); return `${label} · ${days ? `还有 ${days} 天` : '就是今天'}`; }
+  return `${label} · 剩余 ${remaining(Date.parse(item.ends_at) - now)}`;
 }
 
 export function OnScreen({ items, rooms, known, now, ready, busy, onRemove }: {

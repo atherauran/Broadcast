@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "teacher",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "apps/teacher", "run", "dev"],
+      "port": 5173
+    }
+  ]
+}
