@@ -250,6 +250,8 @@ internal sealed class CountdownWindow : StateWindow
             SizeToContent = SizeToContent.WidthAndHeight;
             var stack = new StackPanel(); stack.Children.Add(Label); stack.Children.Add(Digits);
             Content = new Border { Background = new SolidColorBrush(Color.Parse("#EB111827")), CornerRadius = new CornerRadius(18),
+                // The outline keeps a timer apart from a day count it may overlap.
+                BorderBrush = new SolidColorBrush(Color.Parse("#38BDF8")), BorderThickness = new Thickness(3),
                 Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = stack };
             SizeChanged += (_, _) => PlaceInCorner(top: true);
             return;
