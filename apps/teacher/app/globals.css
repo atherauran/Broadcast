@@ -129,8 +129,7 @@ h1,h2,p { margin: 0; } h1 { font-size: 23px; letter-spacing: -.6px; font-weight:
 .time-select select { min-height: 38px; padding: 0 30px 0 12px; border: 1px solid #cfd7e4; border-radius: 10px; color: #182236; font: inherit; font-variant-numeric: tabular-nums; cursor: pointer; appearance: none;
   background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%235f6c80' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 4.5 3 3 3-3'/%3E%3C/svg%3E") no-repeat right 10px center; }
 .time-select select:hover { border-color: #8aa8dc; } .time-select select:focus-visible { outline: 3px solid #93b7ff; outline-offset: 2px; }
-.date-input { width: auto; height: 38px; font-size: 16px; border-radius: 10px; }
-.date-input.empty::-webkit-datetime-edit, .date-input.empty::-webkit-datetime-edit-text, .date-input.empty::-webkit-datetime-edit-month-field, .date-input.empty::-webkit-datetime-edit-day-field, .date-input.empty::-webkit-datetime-edit-year-field { color: #b4bdcb; }
+.date-input { width: 150px; height: 38px; font-size: 16px; border-radius: 10px; }
 .minutes-input { display: flex; align-items: center; gap: 8px; color: #344158; } .minutes-input input { width: 84px; height: 38px; font-size: 16px; border-radius: 10px; }
 .note-yellow { background: #fff6c2 !important; } .note-blue { background: #e4efff !important; } .note-green { background: #e1f5e8 !important; } .note-pink { background: #ffe6ef !important; }
 .choice-row button.color-choice { width: 52px; padding: 0; font-weight: 600; }

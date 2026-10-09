@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  fillTemplate, localInput, pastedLines, soonTime, templateBlanks } from '@/lib/domain';
+  fillTemplate, pastedLines, soonTime, templateBlanks } from '@/lib/domain';
 import { Choices, EmotionPicker, EndPicker, Option, TimeSelect, VoicePicker } from './fields';
 import type { AlertDraft, BannerDraft, BoardDraft, CountdownDraft, NoteDraft } from './drafts';
 
@@ -115,6 +115,20 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
   </>;
 }
 
+// A plain text field so the format reads yyyy/mm/dd in every browser; slashes are added as digits are typed.
+function DateInput({ value, onChange }: { value: string; onChange: (date: string) => void }) {
+  const [text, setText] = useState(value.replaceAll('-', '/'));
+  function edit(raw: string) {
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
+    const shown = [digits.slice(0, 4), digits.slice(4, 6), digits.slice(6)].filter(Boolean).join('/');
+    const [y, m, d] = shown.split('/').map(Number);
+    const real = new Date(y, m - 1, d);
+    setText(shown);
+    onChange(digits.length === 8 && real.getFullYear() === y && real.getMonth() === m - 1 && real.getDate() === d ? shown.replaceAll('/', '-') : '');
+  }
+  return <Input className="date-input" inputMode="numeric" placeholder="yyyy/mm/dd" aria-label="目标日期" value={text} onChange={e => edit(e.target.value)} />;
+}
+
 export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft; now: number; onChange: (change: Partial<CountdownDraft>) => void }) {
   return <>
     <Heading title="倒计时" />
@@ -123,7 +137,7 @@ export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft;
       <Choices legend="计时方式" value={draft.mode} options={[{ id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }, { id: 'days', label: '按天数' }]} onChange={mode => onChange({ mode, until: draft.until || soonTime(now) })} />
       {draft.mode === 'days'
         ? <Option label="目标日期"><div className="choice-row">
-          <Input type="date" className={'date-input ' + (draft.date ? '' : 'empty')} aria-label="目标日期" min={localInput(now).slice(0, 10)} value={draft.date} onChange={e => onChange({ date: e.target.value })} />
+          <DateInput value={draft.date} onChange={date => onChange({ date })} />
         </div></Option>
         : draft.mode === 'duration'
         ? <Option label="时长"><div className="choice-row">
