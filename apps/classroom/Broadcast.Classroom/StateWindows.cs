@@ -228,8 +228,9 @@ internal sealed class CountdownWindow : StateWindow
     private static readonly IBrush Done = new SolidColorBrush(Color.Parse("#F87171"));
     private readonly ServerClock _clock;
     private readonly DispatcherTimer _timer;
-    private DateTimeOffset _end;
-    private DateOnly? _date;
+    private readonly List<(TextBlock Digits, DateOnly Date)> _days = [];
+    private readonly StackPanel? _stack;
+    private DateTimeOffset? _end;
     internal TextBlock Label { get; }
     internal TextBlock Digits { get; }
     internal Button? ShrinkButton { get; }
@@ -248,9 +249,9 @@ internal sealed class CountdownWindow : StateWindow
         {
             TransparencyLevelHint = [WindowTransparencyLevel.Transparent]; Background = Brushes.Transparent;
             SizeToContent = SizeToContent.WidthAndHeight;
-            var stack = new StackPanel(); stack.Children.Add(Label); stack.Children.Add(Digits);
+            _stack = new StackPanel(); _stack.Children.Add(Label); _stack.Children.Add(Digits);
             Content = new Border { Background = new SolidColorBrush(Color.Parse("#EB111827")), CornerRadius = new CornerRadius(18),
-                Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = stack };
+                Padding = new Thickness(28, 14, 28, 10), MinWidth = 240, Child = _stack };
             SizeChanged += (_, _) => PlaceInCorner(top: true);
             return;
         }
@@ -271,17 +272,35 @@ internal sealed class CountdownWindow : StateWindow
         Content = new Grid { Children = { new Border { Padding = new Thickness(64, 48), Child = layout }, ShrinkButton } };
     }
 
-    public void Present(DisplayItem countdown)
+    // The corner shows the timed countdown (if any) with the day counts stacked beneath it; fullscreen shows only the timer.
+    public void Present(DisplayItem? timed, IReadOnlyList<DisplayItem>? days = null)
     {
-        _end = countdown.EndsAt; _date = DateOnly.TryParse(countdown.Content.Date, out var date) ? date : null;
-        Label.Text = countdown.Content.Label ?? ""; Label.IsVisible = Label.Text.Length > 0;
+        _end = timed?.EndsAt;
+        Label.Text = timed?.Content.Label ?? ""; Label.IsVisible = Label.Text.Length > 0;
+        Digits.IsVisible = timed is not null;
+        _days.Clear();
+        if (_stack is not null)
+        {
+            while (_stack.Children.Count > 2) _stack.Children.RemoveAt(2);
+            foreach (var day in days ?? [])
+            {
+                if (!DateOnly.TryParse(day.Content.Date, out var date)) continue;
+                var name = Text(day.Content.Label ?? "", 20, "#D6DEE9", FontWeight.SemiBold); name.HorizontalAlignment = HorizontalAlignment.Center;
+                name.IsVisible = !string.IsNullOrEmpty(name.Text);
+                if (_stack.Children.Count > 2 || timed is not null) name.Margin = new Thickness(0, 10, 0, 0);
+                var digits = new TextBlock { FontFamily = Digits.FontFamily, FontSize = timed is null ? 64 : 44, FontWeight = FontWeight.Bold,
+                    Foreground = Running, HorizontalAlignment = HorizontalAlignment.Center };
+                _stack.Children.Add(name); _stack.Children.Add(digits); _days.Add((digits, date));
+            }
+        }
         Tick(); _timer.Start();
     }
 
     internal void Tick()
     {
-        if (_date is { } date) { Digits.Text = Days(date, _clock.Now); Digits.Foreground = Running; return; }
-        var left = _end - _clock.Now;
+        foreach (var (digits, date) in _days) digits.Text = Days(date, _clock.Now);
+        if (_end is not { } end) return;
+        var left = end - _clock.Now;
         Digits.Text = Format(left); Digits.Foreground = left > TimeSpan.Zero ? Running : Done;
     }
 
@@ -302,25 +321,27 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) :
     private NotesWindow? _notes;
     private CountdownWindow? _countdown;
     private DisplayItem? _timer;
+    private DisplayItem[] _days = [];
     private Guid _shrunk;
 
     public async Task ApplyAsync(IReadOnlyList<DisplayItem> visible) => await Dispatcher.UIThread.InvokeAsync(() =>
     {
         var boards = visible.Where(i => i.Kind == "board").OrderByDescending(i => i.StartsAt).ToArray();
         var notes = visible.Where(i => i.Kind == "note").OrderBy(i => i.StartsAt).ToArray();
-        // A timed countdown takes the corner from a day count until it ends.
-        var countdown = visible.Where(i => i.Kind == "countdown").OrderBy(i => i.Content.Date is not null).ThenByDescending(i => i.StartsAt).FirstOrDefault();
+        var countdowns = visible.Where(i => i.Kind == "countdown").ToArray();
+        var timed = countdowns.Where(i => i.Content.Date is null).MaxBy(i => i.StartsAt);
+        _days = countdowns.Where(i => i.Content.Date is not null).OrderBy(i => i.EndsAt).ToArray();
         Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards), WindowLayer.ShowBehindLesson);
         Sync(ref _notes, notes.Length > 0, () => new NotesWindow(), w => w.Present(notes), WindowLayer.ShowBehindLesson);
-        _timer = countdown; ShowCountdown();
+        _timer = timed; ShowCountdown();
     });
 
-    // A shrunk countdown stays in the corner until a new one replaces it.
+    // A shrunk countdown stays in the corner until a new timed one replaces it.
     private void ShowCountdown()
     {
         var fullscreen = _timer is { Content.Fullscreen: true } && _timer.Id != _shrunk;
         if (_countdown is not null && _countdown.IsFullscreen != fullscreen) { _countdown.Dismiss(); _countdown = null; }
-        Sync(ref _countdown, _timer is not null, () => new CountdownWindow(clock, fullscreen ? Shrink : null), w => w.Present(_timer!), w =>
+        Sync(ref _countdown, _timer is not null || _days.Length > 0, () => new CountdownWindow(clock, fullscreen ? Shrink : null), w => w.Present(_timer, _days), w =>
         {
             WindowLayer.ShowPassive(w);
             // A fullscreen broadcast already on screen stays above the timer.
