@@ -1,5 +1,5 @@
 import { PGlite } from '@electric-sql/pglite';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 const admin = '10000000-0000-4000-8000-000000000001';
 const first = '20000000-0000-4000-8000-000000000001';
@@ -43,15 +43,9 @@ beforeAll(async () => {
     grant usage on schema auth, public to authenticated, anon, service_role;
     create publication supabase_realtime;
     insert into auth.users values ('${admin}'),('${first}'),('${second}'),('${third}');`);
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202609080001_broadcast.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202609100001_heartbeat_intervals.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202609120001_broadcast_options.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202610040001_heartbeat_120s.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202610050001_broadcast_style.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202610060001_display_items.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202610070001_display_starts_now.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202610080001_countdown_fullscreen.sql', import.meta.url), 'utf8'));
-  await db.exec(await readFile(new URL('../../../supabase/migrations/202610090001_repeat_max_four.sql', import.meta.url), 'utf8'));
+  const migrations = new URL('../../../supabase/migrations/', import.meta.url);
+  for (const file of (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort())
+    await db.exec(await readFile(new URL(file, migrations), 'utf8'));
   await identity(admin, 'admin');
   await db.query('select bind_device($1,$2,$3)', [first, '8-1', 'classroom-one']);
   await db.query('select bind_device($1,$2,$3)', [second, '8-2', 'classroom-two']);
@@ -165,9 +159,18 @@ describe('display items', () => {
     await db.query("update display_items set starts_at=clock_timestamp()-interval '2 minutes', ends_at=clock_timestamp()-interval '1 second' where request_id=$1", [ended]);
     expect(await screen()).toHaveLength(0);
   });
-  it('allows at most 4 overlapping notes per class', async () => {
-    await clearDisplay(); for (let i = 0; i < 4; i++) await show('note', { text: '便签' + i, color: 'green' });
-    await expect(show('note', { text: '第五张', color: 'green' }, ['8-1', '8-2'])).rejects.toThrow('8-1 已有 4 张便签');
+  it('removes several selected items at once, only for admins', async () => {
+    await clearDisplay(); await show('note', { text: '一', color: 'blue' }, ['8-1', '8-2']); await show('note', { text: '二', color: 'blue' });
+    const keep = await show('note', { text: '三', color: 'blue' });
+    await identity(admin, 'admin');
+    const ids = (await db.query<{ id: string }>('select id from display_items where removed_at is null and request_id <> $1', [keep])).rows.map(r => r.id);
+    await identity(third); await expect(db.query('select remove_display_items($1)', [ids])).rejects.toThrow('管理员');
+    await identity(admin, 'admin'); await db.query('select remove_display_items($1)', [ids]);
+    expect((await screen()).map(i => i.content.text)).toEqual(['三']); expect(await screen(second)).toHaveLength(0);
+  });
+  it('allows at most 12 overlapping notes per class', async () => {
+    await clearDisplay(); for (let i = 0; i < 12; i++) await show('note', { text: '便签' + i, color: 'green' });
+    await expect(show('note', { text: '第十三张', color: 'green' }, ['8-1', '8-2'])).rejects.toThrow('8-1 已有 12 张便签');
     await show('note', { text: '别的班', color: 'green' }, ['8-2']);
   });
   it('keeps one countdown per class, computes its end on the server and lingers 5 seconds', async () => {
@@ -186,7 +189,7 @@ describe('display items', () => {
   });
   it('validates content and times', async () => {
     await expect(show('board', { entries: [], speak: false, voice_type: 101001 })).rejects.toThrow('1–12');
-    await expect(show('board', { entries: ['字'.repeat(101)], speak: false, voice_type: 101001 })).rejects.toThrow('100');
+    await expect(show('board', { entries: ['字'.repeat(301)], speak: false, voice_type: 101001 })).rejects.toThrow('300');
     await expect(show('note', { text: '颜色', color: 'red' })).rejects.toThrow('颜色');
     await expect(show('note', { text: '过去', color: 'red' }, ['8-1'], { end: new Date(Date.now() - 1000).toISOString() })).rejects.toThrow();
     await expect(show('note', { text: '太远', color: 'yellow' }, ['8-1'], { end: new Date(Date.now() + 8 * 86_400_000).toISOString() })).rejects.toThrow('结束时间');
@@ -210,5 +213,35 @@ describe('display items', () => {
     await clearDisplay(); await show('note', { text: '全校', color: 'yellow' }, ['8-1', '8-4']);
     await identity(admin, 'admin'); const overview = await scalar<{ items: { classroom_id: string; teacher_name: string }[] }>('select display_overview()');
     expect(overview.items.map(i => i.classroom_id)).toEqual(['8-1', '8-4']); expect(overview.items[0].teacher_name).toBe('李老师');
+  });
+});
+describe('board themes and schedules', () => {
+  it('defaults a board to the plain theme and validates the choice', async () => {
+    await clearDisplay(); await show('board', { entries: ['节日快乐'], speak: false, voice_type: 101001, theme: 'festive' });
+    await show('board', { entries: ['旧页面'], speak: false, voice_type: 101001 });
+    expect((await screen()).map(i => String(i.content.theme)).toSorted((a, b) => a.localeCompare(b))).toEqual(['festive', 'plain']);
+    await expect(show('board', { entries: ['x'], speak: false, voice_type: 101001, theme: 'neon' })).rejects.toThrow('背景');
+  });
+  const week = [['english', 'math', 'lunch', 'pe'], ['chinese'], [], ['club', 'it'], ['art', 'elective']];
+  const save = (classroom: string, days: unknown) => db.query('select set_schedule($1,$2,$3)', [classroom, JSON.stringify(days), '赵老师']);
+  it('saves a weekly schedule that only its own class receives', async () => {
+    await identity(admin, 'admin'); await save('8-1', week); await save('8-1', week);
+    const rows = await db.query<{ classroom_id: string; days: string[][]; teacher_name: string }>('select classroom_id, days, teacher_name from schedules');
+    expect(rows.rows).toEqual([{ classroom_id: '8-1', days: week, teacher_name: '赵老师' }]);
+    await identity(third); expect((await scalar<{ schedule: string[][] }>('select device_heartbeat(true)')).schedule).toEqual(week);
+    expect((await scalar<{ schedule: string[][] }>('select display_state()')).schedule).toEqual(week);
+    await identity(second); expect((await scalar<{ schedule: string[][] | null }>('select display_state()')).schedule).toBeNull();
+    expect(await scalar<number>('select count(*)::int from schedules')).toBe(0);
+  });
+  it('rejects malformed schedules and non-admin writes', async () => {
+    await identity(admin, 'admin');
+    await expect(save('8-1', week.slice(0, 4))).rejects.toThrow('格式');
+    await expect(save('8-1', [...week.slice(0, 4), Array(13).fill('math')])).rejects.toThrow('格式');
+    await expect(save('8-1', [...week.slice(0, 4), 'math'])).rejects.toThrow('格式');
+    await expect(save('8-1', [...week.slice(0, 4), ['geography']])).rejects.toThrow('课程');
+    await expect(save('8-1', [...week.slice(0, 4), [1]])).rejects.toThrow('课程');
+    await expect(save('8-9', week)).rejects.toThrow('班级');
+    await identity(first); await expect(save('8-3', week)).rejects.toThrow('管理员');
+    await expect(db.query("update schedules set days='[]'")).rejects.toThrow('permission denied');
   });
 });

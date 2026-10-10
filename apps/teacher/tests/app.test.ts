@@ -85,6 +85,15 @@ it('picks the type first and shows only the options that apply', async () => {
   expect(host.textContent).not.toContain('试听');
   await click('朗读一遍'); expect(host.textContent).toContain('试听');
   await click('添加一条'); expect(host.querySelectorAll('.entry-row')).toHaveLength(2);
+  const entries = () => Array.from(host.querySelectorAll<HTMLInputElement>('.entry-row input'));
+  const press = (input: HTMLInputElement, isComposing = false) => act(async () => {
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing }));
+  });
+  await type(entries()[0], '明天穿校服');
+  await press(entries()[0], true); expect(entries()).toHaveLength(2);
+  await press(entries()[0]);
+  expect(entries().map(input => input.value)).toEqual(['明天穿校服', '', '']);
+  expect(document.activeElement).toBe(entries()[1]);
   await act(async () => radio('倒计时').click());
   expect(host.textContent).toContain('25 分钟');
   await act(async () => radio('便签').click());
@@ -97,16 +106,41 @@ it('keeps each draft when switching types', async () => {
   await act(async () => radio('横幅').click()); expect(host.querySelector('textarea')?.value).toBe('');
   await act(async () => radio('全屏广播').click()); expect(host.querySelector('textarea')?.value).toBe('戴好红领巾');
 });
-it('folds each class on the on-screen tab until it is opened', async () => {
+it('folds each class on the on-screen tab and removes ticked items together', async () => {
   const now = Date.now(); const onRemove = vi.fn(async () => true);
-  const rooms: Classroom[] = ['8-1', '8-2'].map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
-  const item: DisplayItem = { id: 'one', request_id: 'req', classroom_id: '8-1', kind: 'note', content: { text: '带水杯', color: 'yellow' },
-    starts_at: new Date(now).toISOString(), ends_at: new Date(now + 3_600_000).toISOString(), teacher_name: '李老师', created_at: new Date(now).toISOString() };
-  await act(async () => root.render(createElement(OnScreen, { items: [item], rooms, known: false, now, ready: true, busy: '', onRemove })));
-  const [first, second] = Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
-  expect(first.getAttribute('aria-expanded')).toBe('false'); expect(host.textContent).not.toContain('带水杯');
-  expect(second.disabled).toBe(true); expect(second.textContent).toContain('没有显示内容');
-  await act(async () => first.click()); expect(host.textContent).toContain('带水杯');
-  await click('移除'); expect(onRemove).toHaveBeenCalledWith(item, false); expect(document.querySelector('[role="alertdialog"]')).toBeNull();
-  await act(async () => first.click()); expect(host.textContent).not.toContain('带水杯');
+  const rooms: Classroom[] = ['8-1', '8-2', '8-3'].map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
+  const note = (id: string, request: string, classroom: string, text: string): DisplayItem => ({ id, request_id: request, classroom_id: classroom, kind: 'note',
+    content: { text, color: 'yellow' }, starts_at: new Date(now).toISOString(), ends_at: new Date(now + 3_600_000).toISOString(), teacher_name: '李老师',
+    created_at: new Date(now).toISOString() });
+  const items = [note('a1', 'a', '8-1', '带水杯'), note('a2', 'a', '8-2', '带水杯'), note('b', 'b', '8-1', '交作业')];
+  await act(async () => root.render(createElement(OnScreen, { items, rooms, known: false, now, ready: true, busy: '', onRemove })));
+  const headings = () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
+  expect(headings()[0].getAttribute('aria-expanded')).toBe('false'); expect(host.textContent).not.toContain('带水杯');
+  expect(headings()[2].disabled).toBe(true); expect(headings()[2].textContent).toContain('没有显示内容');
+  await act(async () => headings()[0].click()); expect(host.textContent).toContain('带水杯');
+  expect(host.querySelector('.selection-bar')).toBeNull();
+  const select = (text: string) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-select')).find(b => b.textContent?.includes(text))!.click());
+  await select('交作业'); expect(host.querySelector('.selection-bar')?.textContent).toContain('已选择 1 项');
+  await click('选中全部 2 个班级'); expect(host.querySelector('.selection-bar')?.textContent).toContain('已选择 3 项');
+  await click('取消全部 2 个班级'); await click('选中全部 2 个班级');
+  await click('移除', host.querySelector('.selection-bar')!);
+  expect(onRemove).toHaveBeenCalledWith(['b', 'a1', 'a2']); expect(host.querySelector('.selection-bar')).toBeNull();
+  await act(async () => headings()[0].click()); expect(host.textContent).not.toContain('带水杯');
+});
+it('builds a weekly schedule day by day and keeps it across tabs', async () => {
+  await click('课程表'); expect(host.querySelector('.day-tabs')).toBeNull();
+  await click('8-2'); expect(localStorage.getItem('broadcast-schedule-class')).toBe('8-2');
+  const day = (label: string) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.day-tabs button')).find(b => b.textContent?.startsWith(label))!.click());
+  await day('周一');
+  for (const subject of ['英语 English', '数学 Math', '午餐 Lunch']) await click(subject);
+  const selects = () => Array.from(host.querySelectorAll<HTMLSelectElement>('.period-select')).map(select => select.value);
+  expect(selects()).toEqual(['english', 'math', 'lunch']);
+  await act(async () => (host.querySelector('[aria-label="删除第 2 节"]') as HTMLButtonElement).click());
+  expect(selects()).toEqual(['english', 'lunch']);
+  await day('周二'); expect(selects()).toEqual([]); await click('体育 PE');
+  expect(host.querySelector('.day-tabs')?.textContent).toContain('周一2 节');
+  await click('发布'); await click('课程表');
+  expect(host.querySelector('.day-tabs')?.textContent).toContain('周二1 节');
+  const save = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('保存 8-2 课程表'));
+  expect(save?.disabled).toBe(true);
 });

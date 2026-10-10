@@ -1,18 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { ArrowUpRight, AudioLines, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
+import { ArrowUpRight, AudioLines, CalendarDays, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, configured, getClassrooms, getHistory, getOverview, once, rpc, supabase } from '@/lib/api';
-import { CLASSROOM_IDS, boardEntries, endOfToday, isOnline, patchDelivery, patchDisplayItems, patchRoom, todayAt, validTeacherName,
-  type Broadcast, type Classroom, type Delivery, type DisplayItem, type DisplayRow, type Kind } from '@/lib/domain';
+import { adminEmail, configured, getClassrooms, getHistory, getOverview, getSchedules, once, rpc, supabase } from '@/lib/api';
+import { CLASSROOM_IDS, boardEntries, endOfToday, isOnline, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, todayAt, validTeacherName,
+  type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind, type Schedule, type Week } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
 import { initialDrafts, type Drafts, type Patch } from './compose/drafts';
 import { History, Receipts, broadcastMeta, time } from './history';
 import { OnScreen } from './on-screen';
 import { Devices } from './devices';
+import { ScheduleEditor } from './schedule';
 
 const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
@@ -33,7 +34,9 @@ export default function App() {
   const [history, setHistory] = useState<Broadcast[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [overview, setOverview] = useState<DisplayItem[]>([]);
-  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'devices'>('send');
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [weekDrafts, setWeekDrafts] = useState<Record<string, Week>>({});
+  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'schedule' | 'devices'>('send');
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -41,6 +44,7 @@ export default function App() {
   const [live, setLive] = useState(false);
   const [network, setNetwork] = useState(navigator.onLine);
   const [now, setNow] = useState(Date.now);
+  // Server time is the local clock until the first response calibrates it.
   const clock = useRef({ server: 0, local: 0 });
   const historyRef = useRef(history);
   const sw = useRegisterSW();
@@ -63,28 +67,29 @@ export default function App() {
     const { data } = supabase.auth.onAuthStateChange((_event, current) => { setSession(current); setAuthReady(true); if (!current) setLive(false); });
     return () => { mounted = false; data.subscription.unsubscribe(); };
   }, []);
+  const serverNow = () => clock.current.server + performance.now() - clock.current.local;
   useEffect(() => {
     clock.current = { server: Date.now(), local: performance.now() };
     const online = () => setNetwork(true);
     const offline = () => { setNetwork(false); setLive(false); };
     window.addEventListener('online', online); window.addEventListener('offline', offline);
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
-  }, [clock]);
+  }, []);
   // Only the on-screen tab shows a countdown, so only it needs a per-second render.
   useEffect(() => {
-    const timer = window.setInterval(() => { if (!document.hidden) setNow(clock.current.server + performance.now() - clock.current.local); }, tab === 'screen' ? 1000 : 5000);
+    const timer = window.setInterval(() => { if (!document.hidden) setNow(serverNow()); }, tab === 'screen' ? 1000 : 5000);
     return () => clearInterval(timer);
-  }, [clock, tab]);
+  }, [tab]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const mergeHistory = useCallback((items: Broadcast[]) => setHistory(old => {
     const all = new Map(old.map(item => [item.id, item]));
     items.forEach(item => all.set(item.id, item));
     return [...all.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }), []);
-  const sync = useCallback((serverNow: string) => {
-    clock.current = { server: Date.parse(serverNow), local: performance.now() };
+  const sync = useCallback((server: string) => {
+    clock.current = { server: Date.parse(server), local: performance.now() };
     setNow(clock.current.server);
-  }, [clock]);
+  }, []);
   const refreshRooms = useCallback(async () => {
     const result = await getClassrooms();
     sync(result.server_now); setRooms(result.classrooms);
@@ -97,12 +102,12 @@ export default function App() {
     if (!userId || !supabase || !network) return;
     let disposed = false;
     // Deliveries of a broadcast this page has not loaded yet wait here while its history is fetched once.
-    const loading = new Map<string, Delivery[]>();
+    const loading = new Map<string, DeliveryRow[]>();
     const load = async () => {
       try {
         await refreshRooms();
-        const [items] = await Promise.all([getHistory(), refreshOverview()]);
-        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); }
+        const [items, weeks] = await Promise.all([getHistory(), getSchedules(), refreshOverview()]);
+        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); }
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
@@ -114,18 +119,21 @@ export default function App() {
         const removal = payload.eventType === 'DELETE';
         setOverview(old => patchDisplayItems(old, removal, (removal ? payload.old : payload.new) as DisplayRow));
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, payload => {
+        if (payload.eventType !== 'DELETE') setSchedules(old => patchSchedule(old, payload.new as Schedule));
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, payload => {
-        const row = payload.new as Delivery & { broadcast_id?: string };
+        if (payload.eventType === 'DELETE') return;
+        const row = payload.new as DeliveryRow;
         const id = row.broadcast_id;
-        if (!id) return;
-        if (historyRef.current.some(item => item.id === id)) { setHistory(old => patchDelivery(old, row as Delivery & { broadcast_id: string })); return; }
+        if (historyRef.current.some(item => item.id === id)) { setHistory(old => patchDelivery(old, row)); return; }
         const waiting = loading.get(id);
         if (waiting) { waiting.push(row); return; }
         loading.set(id, [row]);
         void getHistory(null, id).then(items => {
           if (disposed) return;
           mergeHistory(items);
-          setHistory(old => (loading.get(id) ?? []).reduce((all, late) => patchDelivery(all, late as Delivery & { broadcast_id: string }), old));
+          setHistory(old => (loading.get(id) ?? []).reduce(patchDelivery, old));
         }).catch(e => { if (!disposed) setError(message(e)); }).finally(() => loading.delete(id));
       })
       .subscribe(status => {
@@ -133,7 +141,12 @@ export default function App() {
         setLive(status === 'SUBSCRIBED');
         if (status === 'SUBSCRIBED') void load();
       });
-    const resume = () => { if (document.visibilityState === 'visible') void load(); };
+    // A brief switch away keeps the socket alive and misses nothing; a longer one may have lost events, so reload then.
+    let hiddenAt = 0;
+    const resume = () => {
+      if (document.visibilityState === 'hidden') hiddenAt = Date.now();
+      else if (Date.now() - hiddenAt > 30_000) void load();
+    };
     document.addEventListener('visibilitychange', resume);
     return () => { disposed = true; document.removeEventListener('visibilitychange', resume); void supabase!.removeChannel(channel); };
   }, [userId, network, refreshRooms, refreshOverview, mergeHistory]);
@@ -143,6 +156,14 @@ export default function App() {
   async function run(name: string, action: () => Promise<void>): Promise<boolean> {
     setBusy(name); setError('');
     try { await action(); return true; } catch (e) { setError(message(e)); return false; } finally { setBusy(''); }
+  }
+  function logout() {
+    void run('logout', async () => {
+      const { error } = await supabase!.auth.signOut({ scope: 'local' });
+      if (error) throw error;
+      localStorage.removeItem(teacherKey);
+      setTeacherName(''); setHistory([]); setOverview([]); setSchedules([]); setWeekDrafts({}); setRooms(emptyRooms);
+    });
   }
   async function login() {
     if (!validTeacherName(loginName)) { setError('请输入 1–40 字老师姓名'); return; }
@@ -159,13 +180,14 @@ export default function App() {
     const id = await once('broadcast-attempt', [input, classrooms, teacherName], id =>
       rpc<string>('create_broadcast', { p_id: id, p_classrooms: classrooms, p_teacher_name: teacherName, ...input }));
     setLatestId(id);
-    await getHistory(null, id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
+    // While live, the new delivery rows arrive over Realtime and fetch this broadcast themselves.
+    if (!live) await getHistory(null, id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
   }
   async function createDisplay(display: 'board' | 'note' | 'countdown', content: object, times: object) {
     const classrooms = [...selected].sort();
     await once('display-attempt', [display, content, times, classrooms, teacherName], id =>
       rpc('create_display_item', { p_request: id, p_kind: display, p_classrooms: classrooms, p_content: content, p_teacher_name: teacherName, ...times }));
-    await refreshOverview().catch(e => setError(message(e)));
+    if (!live) await refreshOverview().catch(e => setError(message(e)));
   }
   function submit() {
     void run('send', async () => {
@@ -180,7 +202,7 @@ export default function App() {
           p_voice_type: 101001, p_style: 'banner', p_banner_position: b.position });
       } else if (kind === 'board') {
         const b = drafts.board;
-        await createDisplay('board', { title: b.title.trim(), entries: boardEntries(b.entries), speak: b.speak, voice_type: b.voiceType }, endsAt(b.endAt, now));
+        await createDisplay('board', { title: b.title.trim(), entries: boardEntries(b.entries), speak: b.speak, voice_type: b.voiceType, theme: b.theme }, endsAt(b.endAt, now));
         patch('board', { title: '', entries: [''] });
       } else if (kind === 'note') {
         await createDisplay('note', { text: drafts.note.text.trim(), color: drafts.note.color }, endsAt(drafts.note.endAt, now));
@@ -207,22 +229,28 @@ export default function App() {
   const ready = configured && !!session && network && validTeacherName(teacherName);
   const latest = history.find(b => b.id === latestId);
   useEffect(() => registerBroadcastTools(
-    () => ({ connected: known, classrooms: rooms.map(room => ({ id: room.id, online: known ? isOnline(room, clock.current.server + performance.now() - clock.current.local) : null })) }),
+    () => ({ connected: known, classrooms: rooms.map(room => ({ id: room.id, online: known ? isOnline(room, serverNow()) : null })) }),
     (text, targets) => { patch('alert', { body: text, sourceId: null }); setSelected(targets); setKind('alert'); setTab('send'); },
-  ), [known, rooms, clock, patch]);
+  ), [known, rooms, patch]);
 
   if (configured && !authReady) return <main className="login-shell"><p>正在恢复登录…</p></main>;
-  if (configured && !session) return <Login name={loginName} setName={setLoginName} password={password} setPassword={setPassword} error={error} busy={busy} network={network} onSubmit={() => void login()} />;
+  if (configured && !session) return <Login name={loginName} setName={setLoginName} password={password} setPassword={setPassword}
+    error={error} busy={busy} network={network} onSubmit={() => void login()} />;
   return <div className="app-shell">
-    <header className="app-header"><div className="brand"><span className="brand-icon"><Radio size={22} /></span><span>校园广播</span></div>
-      <div className="header-actions"><span className="teacher-chip">{teacherName}</span><Button variant="ghost" className="icon-action" aria-label="设备管理" onClick={() => setTab('devices')}><Settings2 size={20} /></Button>
-      {session && <Button variant="ghost" className="icon-action" aria-label="退出登录" onClick={() => void run('logout', async () => { const { error } = await supabase!.auth.signOut({ scope: 'local' }); if (error) throw error; localStorage.removeItem(teacherKey); setTeacherName(''); setHistory([]); setOverview([]); setRooms(emptyRooms); })}><LogOut size={19} /></Button>}</div>
+    <header className="app-header">
+      <div className="brand"><span className="brand-icon"><Radio size={22} /></span><span>校园广播</span></div>
+      <div className="header-actions">
+        <span className="teacher-chip">{teacherName}</span>
+        <Button variant="ghost" className="icon-action" aria-label="设备管理" onClick={() => setTab('devices')}><Settings2 size={20} /></Button>
+        {session && <Button variant="ghost" className="icon-action" aria-label="退出登录" onClick={logout}><LogOut size={19} /></Button>}
+      </div>
     </header>
     <main className="workspace">
       <nav className="tabs" aria-label="主要导航">
         <button className={tab === 'send' ? 'active' : ''} onClick={() => setTab('send')}><AudioLines size={19} />发布</button>
         <button className={tab === 'screen' ? 'active' : ''} onClick={() => setTab('screen')}><MonitorPlay size={18} />正在显示</button>
         <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><Clock3 size={18} />广播历史</button>
+        <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}><CalendarDays size={18} />课程表</button>
       </nav>
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
       {configured && !known && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
@@ -231,16 +259,29 @@ export default function App() {
       {tab === 'send' && <>
         <Compose kind={kind} setKind={setKind} rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError} />
-        {latest && <section className="section delivery-panel" aria-live="polite"><div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div><p className="broadcast-body">{latest.body}</p><p className="broadcast-meta">{broadcastMeta(latest)}</p><Receipts item={latest} rooms={rooms} known={known} now={now} /></section>}
-        {!latest && history.length > 0 && <button className="recent-link" onClick={() => { setTab('history'); setExpanded(history[0].id); }}><span><span className="muted">最近广播 · {time(history[0].created_at)}</span><span className="recent-body">{history[0].body}</span></span><ArrowUpRight size={20} /></button>}
+        {latest && <section className="section delivery-panel" aria-live="polite">
+          <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
+          <p className="broadcast-body">{latest.body}</p>
+          <p className="broadcast-meta">{broadcastMeta(latest)}</p>
+          <Receipts item={latest} rooms={rooms} known={known} now={now} />
+        </section>}
+        {!latest && history.length > 0 && <button className="recent-link" onClick={() => { setTab('history'); setExpanded(history[0].id); }}>
+          <span><span className="muted">最近广播 · {time(history[0].created_at)}</span><span className="recent-body">{history[0].body}</span></span>
+          <ArrowUpRight size={20} />
+        </button>}
       </>}
       {tab === 'screen' && <OnScreen items={overview} rooms={rooms} known={known} now={now} ready={ready} busy={busy}
-        onRemove={(item, all) => run('remove', async () => { await rpc('remove_display_item', { p_id: item.id, p_all: all }); await refreshOverview(); })} />}
+        onRemove={ids => run('remove', async () => { await rpc('remove_display_items', { p_ids: ids }); if (!live) await refreshOverview(); })} />}
       {tab === 'history' && <History history={history} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
         onResend={resend} rooms={rooms} known={known} now={now} configured={configured} />}
+      {tab === 'schedule' && <ScheduleEditor schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy}
+        onSave={(classroom, days) => run('schedule', async () => {
+          await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_teacher_name: teacherName });
+          setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
+        })} />}
       {tab === 'devices' && <Devices rooms={rooms} ready={ready} busy={busy} onBack={() => setTab('send')}
-        onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); await refreshRooms(); })} />}
+        onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })} />}
     </main>
   </div>;
 }

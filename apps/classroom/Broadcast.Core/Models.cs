@@ -29,16 +29,18 @@ public sealed record DeviceCredential(string Id, string Email, string Password);
 public sealed record RegisteredDevice(DeviceCredential Credential, string ClassroomId);
 public sealed record Classroom(string Id, string? DeviceId, string? DeviceName, string? LastSeenAt, bool Connected);
 public sealed record ClassroomStatus(DateTimeOffset ServerNow, Classroom[] Classrooms);
-public sealed record Heartbeat(bool Active, string? ClassroomId, DateTimeOffset ServerNow, DisplayItem[]? Display = null);
+// Schedule is the class's week, Monday first, as subject ids; null when none is set.
+public sealed record Heartbeat(bool Active, string? ClassroomId, DateTimeOffset ServerNow, DisplayItem[]? Display = null, string[][]? Schedule = null);
 public sealed record PendingBatch(DateTimeOffset ServerNow, Delivery[] Items);
 public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt, string TeacherName = "未知老师", int RepeatCount = 1, bool AutoClose = true,
     string Emotion = "normal", int VoiceType = 101001, string Style = "fullscreen", string BannerPosition = "top");
-// One record for every kind: board uses Title/Entries/Speak/VoiceType, note Text/Color, countdown Label/Fullscreen, or Date for a day count.
+// One record for every kind: board uses Title/Entries/Speak/VoiceType/Theme, note Text/Color, countdown Label/Fullscreen, or Date for a day count.
 public sealed record DisplayContent(string? Title = null, string[]? Entries = null, bool Speak = false, int VoiceType = 101001,
-    string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false, string? Date = null);
+    string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false, string? Date = null, string? Theme = null);
 public sealed record DisplayItem(Guid Id, string Kind, DisplayContent Content, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string TeacherName);
-public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items);
+public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items, string[][]? Schedule = null);
+public sealed record DaySchedule(DateOnly Date, string[] Periods);
 public sealed record Receipt(Guid DeliveryId, string Event, DateTimeOffset At, string? Error = null);
 
 public sealed class ServerClock
@@ -70,7 +72,7 @@ public interface IBannerDisplay
 }
 public interface IStateDisplay
 {
-    Task ApplyAsync(IReadOnlyList<DisplayItem> visible);
+    Task ApplyAsync(IReadOnlyList<DisplayItem> visible, DaySchedule? today);
 }
 public interface IAudioPlayer
 {

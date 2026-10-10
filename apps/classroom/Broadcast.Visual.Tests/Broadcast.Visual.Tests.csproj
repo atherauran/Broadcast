@@ -9,5 +9,6 @@
     <Compile Include="../Broadcast.Classroom/BannerWindow.cs" Link="BannerWindow.cs" />
     <Compile Include="../Broadcast.Classroom/WindowLayer.cs" Link="WindowLayer.cs" />
     <Compile Include="../Broadcast.Classroom/StateWindows.cs" Link="StateWindows.cs" />
+    <Compile Include="../Broadcast.Classroom/Backdrop.cs" Link="Backdrop.cs" />
   </ItemGroup>
 </Project>

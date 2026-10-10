@@ -22,6 +22,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("A newer banner replaces the current one", BannerReplace),
     ("Display items appear and end on the server clock, countdowns linger", DisplaySchedule),
     ("Unchanged display state is not re-applied, removal is", DisplayDiff),
+    ("The schedule shows the local weekday's lessons, Monday to Friday", ScheduleDays),
     ("A board is read once, line by line, only near its start", BoardReadOnce),
     ("A fullscreen broadcast cuts off board reading", PrimaryPreempts),
 };
@@ -42,6 +43,8 @@ if (args.Contains("--realtime"))
     catch (Exception e) { failed++; Console.WriteLine("FAIL Revoked token: " + e.Message); }
     try { await DeviceSignInSmoke(); Console.WriteLine("PASS Device credential signs in again after a restored refresh token fails"); }
     catch (Exception e) { failed++; Console.WriteLine("FAIL Device sign-in: " + e.Message); }
+    try { await VoidRpcSmoke(); Console.WriteLine("PASS A function returning void accepts the empty response"); }
+    catch (Exception e) { failed++; Console.WriteLine("FAIL Void RPC: " + e.Message); }
 }
 return failed == 0 ? 0 : 1;
 
@@ -72,6 +75,13 @@ static async Task DeviceSignInSmoke()
     throw new Exception("Expected a session expiry");
 }
 
+static async Task VoidRpcSmoke()
+{
+    using var backend = new BackendClient(new ServiceConfig("http://127.0.0.1:54329", "fixture-key"),
+        device: new DeviceCredential("20000000-0000-4000-8000-000000000001", "device@devices.broadcast.invalid", "device-password"));
+    await backend.RpcAsync("unbind_device", new { p_classroom = "8-1" });
+}
+
 static async Task RealtimeSmoke()
 {
     using var backend = new BackendClient(new ServiceConfig("http://127.0.0.1:54329", "fixture-public-key"),
@@ -92,7 +102,7 @@ static async Task RealtimeSmoke()
     catch (OperationCanceledException) when (beats == 3) { }
     // beats: 1 on join + 1 per 6 keepalives; changes: 1 on join + 1 per 2 keepalives.
     Check(beats == 3 && changes >= 1 + 3 * (beats - 1), "Subscription/heartbeat did not confirm readiness");
-    Check(displayChanges == 1, "Display item changes were not routed separately");
+    Check(displayChanges == 2, "Display item and schedule changes were not routed separately");
     using var http = new HttpClient();
     var stats = await http.GetFromJsonAsync<JsonElement>("http://127.0.0.1:54329/stats");
     Check(stats.GetProperty("keepalives").GetInt32() >= 12, "Keepalives were not sent on the fast cycle");
@@ -246,9 +256,9 @@ static async Task DisplaySchedule()
     var clock = new ServerClock(); var now = DateTimeOffset.UtcNow; var screen = new FakeScreen();
     var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
     var note = Shown("note", now.AddMinutes(10), now.AddMinutes(30)); var countdown = Shown("countdown", now, now.AddMinutes(5));
-    await state.UpdateAsync([note, countdown], default);
+    await state.UpdateAsync([note, countdown], null, default);
     Check(screen.Last.Select(i => i.Kind).SequenceEqual(new[] { "countdown" }), "Scheduled note shown early");
-    clock.Sync(now.AddMinutes(10)); await state.UpdateAsync([note, countdown], default);
+    clock.Sync(now.AddMinutes(10)); await state.UpdateAsync([note, countdown], null, default);
     Check(screen.Last.Select(i => i.Kind).SequenceEqual(new[] { "note" }), "Note not shown at its start");
     Check(DisplayState.Visible(countdown, now.AddMinutes(5).AddSeconds(4)) && !DisplayState.Visible(countdown, now.AddMinutes(5).AddSeconds(5)));
     Check(!DisplayState.Visible(note, note.EndsAt));
@@ -258,9 +268,26 @@ static async Task DisplayDiff()
     var clock = new ServerClock(); var now = clock.Now; var screen = new FakeScreen();
     var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
     var note = Shown("note", now.AddMinutes(-1), now.AddMinutes(30));
-    await state.UpdateAsync([note], default); await state.UpdateAsync([note with { }], default);
+    await state.UpdateAsync([note], null, default); await state.UpdateAsync([note with { }], null, default);
     Check(screen.Applied.Count == 1, "Same state was applied twice");
-    await state.UpdateAsync([], default); Check(screen.Applied.Count == 2 && screen.Last.Count == 0);
+    await state.UpdateAsync([], null, default); Check(screen.Applied.Count == 2 && screen.Last.Count == 0);
+}
+static async Task ScheduleDays()
+{
+    string[][] week = [["english", "lunch"], ["math"], [], ["art"], ["club"]];
+    DateTimeOffset At(int day) => new(new DateTime(2026, 10, day, 9, 0, 0, DateTimeKind.Local));
+    Check(DisplayState.Today(week, At(12)) is { Periods: ["english", "lunch"] } monday && monday.Date == new DateOnly(2026, 10, 12), "Monday");
+    Check(DisplayState.Today(week, At(16))?.Periods.Single() == "club", "Friday");
+    Check(DisplayState.Today(week, At(14)) is null && DisplayState.Today(week, At(17)) is null && DisplayState.Today(week, At(18)) is null, "Empty day or weekend shown");
+    Check(DisplayState.Today(null, At(12)) is null, "Missing schedule shown");
+    var clock = new ServerClock(); var screen = new FakeScreen();
+    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
+    clock.Sync(At(12)); await state.UpdateAsync([], week, default);
+    Check(screen.Today?.Periods.Length == 2, "Schedule not applied");
+    await state.UpdateAsync([], week, default); Check(screen.Applied.Count == 1, "Same schedule applied twice");
+    clock.Sync(At(13)); await state.UpdateAsync([], week, default);
+    Check(screen.Applied.Count == 2 && screen.Today?.Periods.Single() == "math", "Schedule did not move to the next day");
+    clock.Sync(At(17)); await state.UpdateAsync([], week, default); Check(screen.Today is null, "Weekend still shows a schedule");
 }
 static async Task BoardReadOnce()
 {
@@ -268,11 +295,11 @@ static async Task BoardReadOnce()
     var state = new DisplayState(new FakeScreen(), clock, new BoardReader(speech, audio));
     var entries = Enumerable.Range(1, 12).Select(i => $"第{i}条：" + new string('字', 95)).ToArray();
     var board = Shown("board", now.AddSeconds(-5), now.AddHours(1), new DisplayContent("本周公告", entries, true, 101011));
-    await state.UpdateAsync([board], default); await state.UpdateAsync([board], default);
+    await state.UpdateAsync([board], null, default); await state.UpdateAsync([board], null, default);
     await Until(() => audio.Played == 13);
     Check(speech.Calls == 13 && speech.VoiceTypes.All(v => v == 101011), "Each line should be one short synthesis");
     var old = Shown("board", now.AddMinutes(-5), now.AddHours(1), new DisplayContent("旧公告", ["已经过了朗读时间"], true));
-    await state.UpdateAsync([board, old], default); await Task.Delay(30);
+    await state.UpdateAsync([board, old], null, default); await Task.Delay(30);
     Check(speech.Calls == 13, "A board seen long after its start was read aloud");
 }
 static async Task PrimaryPreempts()
@@ -332,7 +359,8 @@ sealed class FakeScreen : IStateDisplay
 {
     public readonly ConcurrentQueue<IReadOnlyList<DisplayItem>> Applied = [];
     public IReadOnlyList<DisplayItem> Last => Applied.Last();
-    public Task ApplyAsync(IReadOnlyList<DisplayItem> visible) { Applied.Enqueue(visible); return Task.CompletedTask; }
+    public DaySchedule? Today;
+    public Task ApplyAsync(IReadOnlyList<DisplayItem> visible, DaySchedule? today) { Applied.Enqueue(visible); Today = today; return Task.CompletedTask; }
 }
 sealed class FakeBanners : IBannerDisplay
 {

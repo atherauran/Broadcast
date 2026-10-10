@@ -7,12 +7,11 @@ using Broadcast.Core;
 
 namespace Broadcast.Classroom;
 
-internal sealed class BannerWindow : Window
+internal sealed class BannerWindow : ClassroomWindow
 {
     public const double StripHeight = 100;
     private const double EdgeWidth = 3;
     private readonly Border _frame;
-    private bool _closing;
     internal TextBlock Body { get; }
     internal TextBlock Emoji { get; }
     internal TextBlock Teacher { get; }
@@ -22,25 +21,22 @@ internal sealed class BannerWindow : Window
         SystemDecorations = SystemDecorations.None;
         Topmost = true; ShowInTaskbar = false; CanResize = false;
         Height = StripHeight;
-        Background = new SolidColorBrush(Color.Parse("#111827"));
-        var font = new FontFamily("Microsoft YaHei, Segoe UI");
+        Background = Night;
         Emoji = new TextBlock { FontSize = 38, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 16, 0) };
         Body = new TextBlock
         {
-            FontFamily = font, FontWeight = FontWeight.Medium, TextWrapping = TextWrapping.Wrap, MaxLines = 2,
+            FontFamily = Font, FontWeight = FontWeight.Medium, TextWrapping = TextWrapping.Wrap, MaxLines = 2,
             TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
         };
         Teacher = new TextBlock
         {
-            FontFamily = font, FontSize = 18, Foreground = new SolidColorBrush(Color.Parse("#D6DEE9")),
+            FontFamily = Font, FontSize = 18, Foreground = new SolidColorBrush(Color.Parse("#D6DEE9")),
             VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(24, 0, 0, 0),
         };
-        var layout = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
-        Grid.SetColumn(Emoji, 0); Grid.SetColumn(Body, 1); Grid.SetColumn(Teacher, 2);
-        layout.Children.Add(Emoji); layout.Children.Add(Body); layout.Children.Add(Teacher);
+        Grid.SetColumn(Body, 1); Grid.SetColumn(Teacher, 2);
+        var layout = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto"), Children = { Emoji, Body, Teacher } };
         Content = _frame = new Border { Padding = new Thickness(36, 12), Child = layout };
         SizeChanged += (_, _) => Fit();
-        Closing += (_, e) => WindowLayer.KeepOpen(e, _closing);
     }
 
     public void Present(Delivery delivery)
@@ -79,8 +75,6 @@ internal sealed class BannerWindow : Window
         }
         Body.FontSize = lo; Body.MaxLines = 2;
     }
-
-    public void Dismiss() { _closing = true; Close(); }
 }
 
 internal sealed class BannerDisplay(BroadcastDisplay alerts) : IBannerDisplay
@@ -97,5 +91,6 @@ internal sealed class BannerDisplay(BroadcastDisplay alerts) : IBannerDisplay
             if (alerts.Current is { } alert) WindowLayer.PlaceBelow(_window, alert);
         });
     }
+
     public async Task HideAsync() => await Dispatcher.UIThread.InvokeAsync(() => { _window?.Dismiss(); _window = null; });
 }

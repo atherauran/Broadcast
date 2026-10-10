@@ -1,6 +1,6 @@
 import { ClipboardList, Megaphone, PanelTop, Send, StickyNote, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { KINDS, countdownError, endError, validBanner, validBoard, validNote, type Classroom, type Kind } from '@/lib/domain';
+import { KINDS, countdownError, endError, validAlert, validBanner, validBoard, validNote, type Classroom, type Kind } from '@/lib/domain';
 import { ClassPicker } from '../class-picker';
 import { AlertForm, BannerForm, BoardForm, CountdownForm, NoteForm } from './forms';
 import type { Drafts, Patch } from './drafts';
@@ -10,7 +10,7 @@ const actions: Record<Kind, string> = { alert: '发送广播', banner: '发送�
 
 // Text problems only disable sending; time problems are explained because the teacher cannot see them otherwise.
 export function draftCheck(kind: Kind, drafts: Drafts, now: number): { ok: boolean; hint: string } {
-  if (kind === 'alert') return { ok: !!drafts.alert.body.trim() && Array.from(drafts.alert.body.trim()).length <= 300, hint: '' };
+  if (kind === 'alert') return { ok: validAlert(drafts.alert.body), hint: '' };
   if (kind === 'banner') return { ok: validBanner(drafts.banner.body), hint: '' };
   if (kind === 'board') {
     const hint = endError(drafts.board.endAt, now);
@@ -34,7 +34,8 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
   return <>
     <section className="section"><div className="kind-picker" aria-label="发布方式">{KINDS.map(item => {
       const Icon = icons[item.id];
-      return <button key={item.id} type="button" aria-pressed={kind === item.id} className={'kind-card ' + (kind === item.id ? 'selected' : '')} onClick={() => setKind(item.id)}><Icon size={22} />{item.label}</button>;
+      return <button key={item.id} type="button" aria-pressed={kind === item.id} className={'kind-card ' + (kind === item.id ? 'selected' : '')}
+        onClick={() => setKind(item.id)}><Icon size={22} />{item.label}</button>;
     })}</div></section>
     <ClassPicker rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected} />
     <section className="section composer">
@@ -44,9 +45,14 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
       {kind === 'note' && <NoteForm draft={drafts.note} now={now} onChange={change => patch('note', change)} />}
       {kind === 'countdown' && <CountdownForm draft={drafts.countdown} now={now} onChange={change => patch('countdown', change)} />}
       {check.hint && <p className="form-hint error-text">{check.hint}</p>}
-      <div className="composer-bottom"><span className="selected-count">{selected.length ? <>已选择 <strong>{selected.length}</strong> 个班级</> : '请选择接收班级'}</span><div className="send-actions">
-        <Button className="action primary" onClick={onSubmit} disabled={!ready || !!busy || !check.ok || !selected.length}><Send size={17} />{busy === 'send' ? '发送中…' : actions[kind]}</Button>
-      </div></div>
+      <div className="composer-bottom">
+        <span className="selected-count">{selected.length ? <>已选择 <strong>{selected.length}</strong> 个班级</> : '请选择接收班级'}</span>
+        <div className="send-actions">
+          <Button className="action primary" onClick={onSubmit} disabled={!ready || !!busy || !check.ok || !selected.length}>
+            <Send size={17} />{busy === 'send' ? '发送中…' : actions[kind]}
+          </Button>
+        </div>
+      </div>
     </section>
   </>;
 }

@@ -14,6 +14,7 @@ public sealed class ReceiptOutbox
         _path = path;
         _pending = File.Exists(path) ? JsonSerializer.Deserialize<List<Receipt>>(File.ReadAllText(path), Json.Options)! : [];
     }
+
     public void Enqueue(Receipt receipt)
     {
         lock (_lock)
@@ -23,6 +24,7 @@ public sealed class ReceiptOutbox
         }
         Changed?.Invoke();
     }
+
     public async Task FlushAsync(IBackend backend, CancellationToken ct)
     {
         await _flush.WaitAsync(ct);
@@ -41,6 +43,7 @@ public sealed class ReceiptOutbox
         }
         finally { _flush.Release(); }
     }
+
     private void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

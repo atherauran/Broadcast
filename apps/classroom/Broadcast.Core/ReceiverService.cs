@@ -33,15 +33,13 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
                         var state = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, token);
                         clock.Sync(state.ServerNow);
                         if (!state.Active) throw new BindingRevokedException();
-                        if (state.Display is not null) await display.UpdateAsync(state.Display, token);
+                        if (state.Display is not null) await display.UpdateAsync(state.Display, state.Schedule, token);
                         attempt = 0;
                         StatusChanged?.Invoke(state.ClassroomId + " · 在线");
                     }, life.Token);
                 }
-                catch (BindingRevokedException) { BindingRevoked?.Invoke(); return; }
-                catch (SessionExpiredException)
-                { BindingRevoked?.Invoke(); return; }
-                catch (BackendException e) when (e.Status == System.Net.HttpStatusCode.Unauthorized)
+                catch (Exception e) when (e is BindingRevokedException or SessionExpiredException
+                    or BackendException { Status: System.Net.HttpStatusCode.Unauthorized })
                 { BindingRevoked?.Invoke(); return; }
                 catch (OperationCanceledException) when (life.IsCancellationRequested) { return; }
                 catch (Exception e)
@@ -60,6 +58,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
             try { await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = false }, timeout.Token); } catch (Exception) { }
         }
     }
+
     private void Signal() { lock (_work) if (_work.CurrentCount == 0) _work.Release(); }
     private void SignalFlush() { lock (_flushWork) if (_flushWork.CurrentCount == 0) _flushWork.Release(); }
     // A Realtime notification or periodic check looks for new broadcasts and also retries stuck receipts.
@@ -76,6 +75,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
             catch (Exception e) { Report(e); }
         }
     }
+
     // Receipts have their own loop, so a new receipt never triggers a broadcast query and a slow upload never delays one.
     private async Task FlushLoop(CancellationToken ct)
     {
@@ -87,7 +87,8 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
             catch (Exception e) { Report(e); }
         }
     }
-    // Only a display_items change fetches display state; the periodic check rides on the status heartbeat.
+
+    // Only a display_items or schedules change fetches display state; the periodic check rides on the status heartbeat.
     private async Task DisplayLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -97,7 +98,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
             {
                 var state = await backend.RpcAsync<DisplayBatch>("display_state", new { }, ct);
                 clock.Sync(state.ServerNow);
-                await display.UpdateAsync(state.Items, ct);
+                await display.UpdateAsync(state.Items, state.Schedule, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception e) { Report(e); }

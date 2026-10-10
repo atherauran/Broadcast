@@ -51,6 +51,7 @@ public sealed class App : Application
         }
         base.OnFrameworkInitializationCompleted();
     }
+
     private void ShowSettings(bool exitOnly = false, string? notice = null)
     {
         if (_settings is not null) { _settings.Activate(); return; }
@@ -61,6 +62,7 @@ public sealed class App : Application
         _settings.ExitAuthorized += () => Dispatcher.UIThread.Post(async () => await TransitionAsync(async () => { await StopAsync(); _desktop.Shutdown(); }));
         _settings.Show(); _settings.Activate();
     }
+
     private async Task TransitionAsync(Func<Task> action)
     {
         await _transition.WaitAsync();
@@ -68,6 +70,7 @@ public sealed class App : Application
         catch (Exception e) { LocalState.Log(e); ShowSettings(notice: e.Message); }
         finally { _transition.Release(); }
     }
+
     private async Task StartAsync(DeviceCredential device)
     {
         await StopAsync();
@@ -92,6 +95,7 @@ public sealed class App : Application
         _receiverLife = CancellationTokenSource.CreateLinkedTokenSource(_appLife.Token);
         _receiverTask = Task.Run(() => receiver.RunAsync(_receiverLife.Token));
     }
+
     private async Task StopAsync()
     {
         if (_receiverLife is not null) await _receiverLife.CancelAsync();
@@ -104,6 +108,7 @@ public sealed class App : Application
         _backend?.Dispose(); _backend = null;
         if (_tray is not null) _tray.ToolTipText = "校园广播 · 尚未绑定";
     }
+
     // Exiting without going through StopAsync (Windows shutdown or logoff) must still tell the server this PC is leaving.
     private void GoOffline()
     {
@@ -111,6 +116,7 @@ public sealed class App : Application
         try { Task.Run(() => backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = false }, new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token)).Wait(TimeSpan.FromSeconds(3)); }
         catch (Exception) { }
     }
+
     private async Task ListenForSecondInstance()
     {
         while (!_appLife.IsCancellationRequested)

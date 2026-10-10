@@ -12,16 +12,24 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly HashSet<Guid> _read = [];
-    private DisplayItem[] _items = [];
-    private string _shown = "[]";
+    private Desired _desired = new([], null);
+    private string _shown = "";
     public event Action<Exception>? Error;
 
     public static bool Visible(DisplayItem item, DateTimeOffset now) =>
         item.StartsAt <= now && now < item.EndsAt + (item.Kind == "countdown" ? CountdownLinger : TimeSpan.Zero);
 
-    public async Task UpdateAsync(DisplayItem[] items, CancellationToken ct)
+    // The timetable for the PC's local date; nothing on weekends (Sunday is -1, Saturday 5) or on a day without lessons.
+    public static DaySchedule? Today(string[][]? week, DateTimeOffset now)
     {
-        Volatile.Write(ref _items, items);
+        var date = DateOnly.FromDateTime(now.LocalDateTime);
+        var day = (int)date.DayOfWeek - 1;
+        return week is not null && day >= 0 && day < week.Length && week[day] is { Length: > 0 } periods ? new(date, periods) : null;
+    }
+
+    public async Task UpdateAsync(DisplayItem[] items, string[][]? week, CancellationToken ct)
+    {
+        Volatile.Write(ref _desired, new(items, week));
         await TickAsync(ct);
     }
 
@@ -39,7 +47,7 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
         finally
         {
             reader.Retain([]);
-            await display.ApplyAsync([]);
+            await display.ApplyAsync([], null);
         }
     }
 
@@ -49,13 +57,17 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
         try
         {
             var now = clock.Now;
-            var visible = Volatile.Read(ref _items).Where(item => Visible(item, now)).ToArray();
-            var signature = JsonSerializer.Serialize(visible, Json.Options);
-            if (signature != _shown) { await display.ApplyAsync(visible); _shown = signature; }
+            var desired = Volatile.Read(ref _desired);
+            var visible = desired.Items.Where(item => Visible(item, now)).ToArray();
+            var today = Today(desired.Week, now);
+            var signature = JsonSerializer.Serialize(new { visible, today }, Json.Options);
+            if (signature != _shown) { await display.ApplyAsync(visible, today); _shown = signature; }
             reader.Retain(visible.Select(item => item.Id));
             foreach (var board in visible.Where(item => item.Kind == "board" && item.Content.Speak && now - item.StartsAt < ReadWindow))
                 if (_read.Add(board.Id)) reader.Start(board, ct);
         }
         finally { _gate.Release(); }
     }
+
+    private sealed record Desired(DisplayItem[] Items, string[][]? Week);
 }

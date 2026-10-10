@@ -38,6 +38,7 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
         }
         finally { _sync.Release(); }
     }
+
     public async Task RunAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -46,10 +47,12 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
             await DrainAsync(ct);
         }
     }
+
     private async Task DrainAsync(CancellationToken ct)
     {
         while (await RunNextAsync(ct)) { }
     }
+
     // Plays the oldest waiting broadcast; false when nothing is waiting.
     private async Task<bool> RunNextAsync(CancellationToken ct)
     {
@@ -82,6 +85,7 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
         }
         return true;
     }
+
     // A finished broadcast waiting for its close button steps aside for a newer one and comes back when that one is done.
     private async Task WaitForCloseAsync(Delivery item, CancellationToken ct)
     {
@@ -95,6 +99,7 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
             await display.ShowAsync(item, ct);
         }
     }
+
     private Task NextArrival()
     {
         lock (_lock)
@@ -104,6 +109,7 @@ public sealed class DeliveryQueue(IBackend backend, IDisplay display, ISpeechSyn
             return _arrived.Task;
         }
     }
+
     private async Task PlayAsync(Delivery item, CancellationToken ct)
     {
         try

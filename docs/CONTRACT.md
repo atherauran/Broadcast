@@ -19,15 +19,17 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `classroom_status` | none | `{server_now, classrooms}`; admin |
 | `bind_device` | `p_device`, `p_classroom`, `p_name` | empty; admin or server |
 | `unbind_device` | `p_classroom` | empty; admin |
-| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display}`; current device. `display` is the same item list as `display_state` |
+| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule}`; current device. `display` and `schedule` are the same as in `display_state` |
 | `pending_broadcasts` | none | `{server_now, items}`; only this device's current class, not started and not expired |
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
 | `ack_delivery` | `p_delivery`, `p_event`, `p_at`, nullable `p_error` | empty; this device's receipt, safe to retry |
 | `broadcast_history` | nullable `p_before`, nullable `p_id` | up to 20 broadcasts with nested `deliveries`; admin |
 | `create_display_item` | `p_request`, `p_kind`, `p_classrooms`, `p_content`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_duration_seconds` | the request ID; admin, idempotent per request |
 | `remove_display_item` | `p_id`, `p_all` (default false) | empty; admin. `p_all` removes the item from every class of the same request |
+| `remove_display_items` | `p_ids` | empty; admin. Removes the given items in one request |
 | `display_overview` | none | `{server_now, items}`: every live item in all classes; admin |
-| `display_state` | none | `{server_now, items}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name` |
+| `display_state` | none | `{server_now, items, schedule}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, and its class's week (see Schedules) or null |
+| `set_schedule` | `p_classroom`, `p_days`, `p_teacher_name` | empty; admin. Replaces the class's week |
 
 `create_broadcast` is an admin RPC called by the teacher app with `p_id`, `p_body`, `p_classrooms`, `p_source`, `p_teacher_name`, `p_repeat_count` (0–4), `p_auto_close`, `p_emotion`, `p_voice_type`, `p_style` and `p_banner_position`. It validates every field, is idempotent per `p_id`, and writes the broadcast and all class deliveries in one transaction.
 
@@ -42,15 +44,19 @@ Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`,
 `display_items` holds one row per class for each board, note or countdown: `request_id`, `classroom_id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, `created_by`, `created_at` and nullable `removed_at`. Devices may select only their current class's rows (removed rows included, so Realtime delivers removals). Every write goes through the admin RPCs above.
 
 `content` by kind:
-- board: `{title, entries, speak, voice_type}`, with title at most 30 characters (default 公告) and 1–12 entries of at most 300 characters each.
+- board: `{title, entries, speak, voice_type, theme}`, with title at most 30 characters (default 公告), 1–12 entries of at most 300 characters each, and theme `plain` (default), `festive`, `joyful`, `fresh`, `tech` or `safety`. All boards share one window, which uses the newest board's theme.
 - note: `{text, color}`, with text 1–60 characters and color `yellow`, `blue`, `green` or `pink`.
 - countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false. A day count adds `date` (`YYYY-MM-DD`, `fullscreen` must be false): the device shows the calendar days left on its local date, "今天" on the day itself.
 
-Every item starts when it is created (`starts_at` is the server time); the end must fall in the future and within 7 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 7-day and 12-hour limits, and never replaces anything: up to 3 day counts can be live per class (a fourth is refused), and a timed countdown replaces only another timed one. The device shows the newest timed countdown in its own topmost corner window, and the day counts (soonest first) stacked in a separate top-right desktop window that other windows can cover, like notes. A note is refused when a target class already shows 4 notes. Device queries keep a countdown for 5 seconds past `ends_at`.
+Every item starts when it is created (`starts_at` is the server time); the end must fall in the future and within 7 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 7-day and 12-hour limits, and never replaces anything: up to 3 day counts can be live per class (a fourth is refused), and a timed countdown replaces only another timed one. The device shows the day counts (soonest first) at the top right, above the timetable, in a desktop window that other windows can cover. Beside that column sit the newest timed countdown in its own topmost window and, below it, the notes (oldest first) in a desktop window that other windows can cover, starting a new column to the left when the screen height runs out. A note is refused when a target class already shows 12 notes. Device queries keep a countdown for 5 seconds past `ends_at`.
+
+## Schedules
+
+`schedules` holds one row per class: `classroom_id`, `days`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, from `english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
 
 ## Realtime and presence
 
-The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items` changes without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
+The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items` and `schedules`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items` and `schedules` changes without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
 
 After the subscription succeeds, the classroom starts reporting heartbeats: every 20 seconds it sends a Phoenix keepalive over the WebSocket and waits for the ack (Supabase requires one at least every 25 seconds; it does no database work). Every 120 seconds it also reports the device heartbeat, whose response carries the display state, and the server marks a classroom offline after 270 seconds without a valid heartbeat. Reconnects back off to about 10 seconds and, once restored, query for unexpired messages. Every 40 seconds a healthy connection also re-queries valid deliveries, so a single lost notification is not missed.
 
@@ -60,4 +66,4 @@ Receipts and online status are shown separately. The 30-second validity limits o
 
 ## Rollout order
 
-Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items.
+Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items. The schedules migration must be applied before the new classroom app ships, because its Realtime join includes the `schedules` table; older classroom apps ignore schedules and board themes.

@@ -7,6 +7,7 @@ namespace Broadcast.Classroom;
 
 internal static class LocalState
 {
+    private static readonly object LogLock = new();
     public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BroadcastClassroom");
     private static string CredentialPath => Path.Combine(Folder, "device.credential");
     private static string LegacySessionPath => Path.Combine(Folder, "device.session");
@@ -17,12 +18,14 @@ internal static class LocalState
         if (File.Exists(local)) path = local;
         return File.Exists(path) ? JsonSerializer.Deserialize<ServiceConfig>(File.ReadAllText(path), Json.Options)! : new();
     }
+
     public static bool HasLegacySession => File.Exists(LegacySessionPath);
     public static DeviceCredential? LoadDevice()
     {
         if (!File.Exists(CredentialPath) || !OperatingSystem.IsWindows()) return null;
         return JsonSerializer.Deserialize<DeviceCredential>(ProtectedData.Unprotect(File.ReadAllBytes(CredentialPath), null, DataProtectionScope.CurrentUser), Json.Options);
     }
+
     public static void SaveDevice(DeviceCredential device)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("设备绑定仅在 Windows 上保存");
@@ -32,6 +35,7 @@ internal static class LocalState
         File.Move(CredentialPath + ".tmp", CredentialPath, true);
         File.Delete(LegacySessionPath);
     }
+
     public static void ForgetDevice() { File.Delete(CredentialPath); File.Delete(LegacySessionPath); }
     public static void EnableAutoStart()
     {
@@ -39,11 +43,12 @@ internal static class LocalState
         using var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
         key.SetValue("BroadcastClassroom", "\"" + Environment.ProcessPath + "\" --background");
     }
+
     public static void Log(Exception error)
     {
         Directory.CreateDirectory(Folder);
         var path = Path.Combine(Folder, "client.log");
-        lock (Folder)
+        lock (LogLock)
         {
             if (File.Exists(path) && new FileInfo(path).Length > 1_000_000) File.Move(path, path + ".previous", true);
             File.AppendAllText(path, DateTimeOffset.Now.ToString("O") + " " + error + Environment.NewLine);

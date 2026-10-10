@@ -4,7 +4,6 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Broadcast.Core;
-using System.Text.Json;
 
 namespace Broadcast.Classroom;
 
@@ -12,14 +11,14 @@ internal sealed class SetupWindow : Window
 {
     private readonly ServiceConfig _config;
     private readonly DeviceCredential? _existing;
+    private readonly bool _exitOnly;
+    private readonly CancellationTokenSource _life = new();
     private readonly StackPanel _content = new() { Spacing = 18 };
     private readonly TextBlock _error = new() { Foreground = new SolidColorBrush(Color.Parse("#b42318")), FontSize = 15, TextWrapping = TextWrapping.Wrap };
     private BackendClient? _admin;
     private string? _selected;
     private string? _currentClass;
     private bool _busy;
-    private readonly bool _exitOnly;
-    private readonly CancellationTokenSource _life = new();
     public event Action<RegisteredDevice>? Bound;
     public event Action? Unbound;
     public event Action? ExitAuthorized;
@@ -35,9 +34,17 @@ internal sealed class SetupWindow : Window
         Closed += (_, _) => { _life.Cancel(); _admin?.Dispose(); };
         ShowLogin(notice);
     }
+
     private static TextBlock Heading(string text) => new() { Text = text, FontSize = 25, FontWeight = FontWeight.SemiBold };
     private static TextBlock Note(string text) => new() { Text = text, FontSize = 15, Foreground = new SolidColorBrush(Color.Parse("#526078")), TextWrapping = TextWrapping.Wrap, LineHeight = 25 };
     private static Button ActionButton(string label) => new() { Content = label, FontSize = 16, MinHeight = 46, Padding = new Thickness(18, 10), HorizontalAlignment = HorizontalAlignment.Stretch };
+    private static Button PrimaryButton(string label)
+    {
+        var button = ActionButton(label);
+        button.Background = new SolidColorBrush(Color.Parse("#2563eb")); button.Foreground = Brushes.White;
+        return button;
+    }
+
     private void ShowLogin(string? notice)
     {
         _content.Children.Clear();
@@ -51,8 +58,7 @@ internal sealed class SetupWindow : Window
         _content.Children.Add(new TextBlock { Text = "管理员密码", FontSize = 15, Margin = new Thickness(0, 8, 0, -8) });
         var password = new TextBox { PasswordChar = '●', FontSize = 18, MinHeight = 46 };
         _content.Children.Add(password);
-        var login = ActionButton("验证密码");
-        login.Background = new SolidColorBrush(Color.Parse("#2563eb")); login.Foreground = Brushes.White;
+        var login = PrimaryButton("验证密码");
         login.Click += async (_, _) => await RunAsync(login, async () =>
         {
             _admin?.Dispose(); _admin = new BackendClient(_config);
@@ -64,6 +70,7 @@ internal sealed class SetupWindow : Window
         _content.Children.Add(login); _content.Children.Add(_error);
         Opened += (_, _) => password.Focus();
     }
+
     private async Task ShowClassesAsync()
     {
         var state = await _admin!.RpcAsync<ClassroomStatus>("classroom_status", new { }, _life.Token);
@@ -82,8 +89,7 @@ internal sealed class SetupWindow : Window
             button.Tag = room.Id; buttons.Add(button); grid.Children.Add(button);
         }
         _content.Children.Add(grid);
-        var bind = ActionButton(_existing is null ? "绑定并开始接收" : "保存设置");
-        bind.Background = new SolidColorBrush(Color.Parse("#2563eb")); bind.Foreground = Brushes.White;
+        var bind = PrimaryButton(_existing is null ? "绑定并开始接收" : "保存设置");
         bind.Click += async (_, _) => await RunAsync(bind, async () =>
         {
             if (_selected is null) throw new InvalidOperationException("请先选择班级");
@@ -92,7 +98,7 @@ internal sealed class SetupWindow : Window
                 result = await _admin.ApiAsync<RegisteredDevice>(new { action = "register-device", classroom_id = _selected, name = Environment.MachineName }, _life.Token);
             else
             {
-                await _admin.RpcAsync<JsonElement>("bind_device", new { p_device = _existing.Id, p_classroom = _selected, p_name = Environment.MachineName }, _life.Token);
+                await _admin.RpcAsync("bind_device", new { p_device = _existing.Id, p_classroom = _selected, p_name = Environment.MachineName }, _life.Token);
                 result = new RegisteredDevice(_existing, _selected);
             }
             LocalState.SaveDevice(result.Credential); LocalState.EnableAutoStart(); Bound?.Invoke(result); Close();
@@ -103,7 +109,7 @@ internal sealed class SetupWindow : Window
             var unbind = ActionButton("解除当前班级绑定");
             unbind.Click += async (_, _) => await RunAsync(unbind, async () =>
             {
-                await _admin.RpcAsync<JsonElement>("unbind_device", new { p_classroom = _currentClass }, _life.Token);
+                await _admin.RpcAsync("unbind_device", new { p_classroom = _currentClass }, _life.Token);
                 LocalState.ForgetDevice(); Unbound?.Invoke(); Close();
             });
             _content.Children.Add(unbind);
@@ -121,6 +127,7 @@ internal sealed class SetupWindow : Window
             }
         }
     }
+
     private async Task RunAsync(Button button, Func<Task> action)
     {
         if (_busy) return;
