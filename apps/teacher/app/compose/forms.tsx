@@ -1,18 +1,21 @@
-import { Fragment, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { CalendarDays, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  chars, daysUntil, fillTemplate, localInput, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
-import { Choices, EmotionPicker, EndPicker, Option, TimeSelect, VoicePicker } from './fields';
-import type { AlertDraft, BannerDraft, BoardDraft, CountdownDraft, NoteDraft } from './drafts';
+import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_TEMPLATES, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
+  chars, daysUntil, fillTemplate, localDate, localInput, pastedLines, shiftDays, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
+import { Choices, DatePick, EmotionPicker, EndPicker, Option, TimeSelect, VoicePicker } from './fields';
+import { blankBoard, type AlertDraft, type BannerDraft, type BoardDraft, type CountdownDraft, type NoteDraft } from './drafts';
 
-function Heading({ title, hint, length, limit }: { title: string; hint?: string; length?: number; limit?: number }) {
+function Heading({ title, hint, length, limit, extra, action }: {
+  title: string; hint?: string; length?: number; limit?: number; extra?: ReactNode; action?: ReactNode;
+}) {
   return <div className="section-heading">
-    <div className="heading-title"><h2>{title}</h2>{hint && <span className="heading-hint">{hint}</span>}</div>
+    <div className="heading-title"><h2>{title}</h2>{hint && <span className="heading-hint">{hint}</span>}{extra}</div>
     {limit !== undefined && <span className={'character-count ' + (length! > limit ? 'error-text' : '')}>{length} / {limit}</span>}
+    {action}
   </div>;
 }
 
@@ -99,10 +102,9 @@ function ThemeArt({ theme }: { theme: BoardTheme }) {
   </svg>;
 }
 
-export function BoardForm({ draft, now, onChange, onError }: {
-  draft: BoardDraft; now: number; onChange: (change: Partial<BoardDraft>) => void; onError: (message: string) => void;
-}) {
-  const setEntry = (index: number, value: string) => onChange({ entries: draft.entries.map((entry, at) => at === index ? value : entry) });
+// Numbered announcement lines: Enter adds a line below, and pasting several lines spreads them over new lines.
+export function EntryList({ entries, onChange, onError }: { entries: string[]; onChange: (entries: string[]) => void; onError: (message: string) => void }) {
+  const setEntry = (index: number, value: string) => onChange(entries.map((entry, at) => at === index ? value : entry));
   const list = useRef<HTMLOListElement>(null);
   const focusAt = useRef<number | null>(null);
   function paste(index: number, e: ClipboardEvent<HTMLInputElement>) {
@@ -114,17 +116,17 @@ export function BoardForm({ draft, now, onChange, onError }: {
     const { value, selectionStart, selectionEnd } = e.currentTarget;
     lines[0] = value.slice(0, selectionStart ?? 0) + lines[0];
     lines[lines.length - 1] += value.slice(selectionEnd ?? 0);
-    const entries = draft.entries.flatMap((entry, at) => at === index ? lines : [entry]);
-    if (entries.length > BOARD_ENTRIES) onError(`最多 ${BOARD_ENTRIES} 条公告，多余内容已忽略`);
-    focusAt.current = Math.min(index + lines.length, entries.length, BOARD_ENTRIES) - 1;
-    onChange({ entries: entries.slice(0, BOARD_ENTRIES) });
+    const next = entries.flatMap((entry, at) => at === index ? lines : [entry]);
+    if (next.length > BOARD_ENTRIES) onError(`最多 ${BOARD_ENTRIES} 条公告，多余内容已忽略`);
+    focusAt.current = Math.min(index + lines.length, next.length, BOARD_ENTRIES) - 1;
+    onChange(next.slice(0, BOARD_ENTRIES));
   }
   // Enter starts a new line right after this one; while an input method is composing, Enter only confirms the characters.
   function enter(index: number, e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== 'Enter' || e.nativeEvent.isComposing || draft.entries.length >= BOARD_ENTRIES) return;
+    if (e.key !== 'Enter' || e.nativeEvent.isComposing || entries.length >= BOARD_ENTRIES) return;
     e.preventDefault();
     focusAt.current = index + 1;
-    onChange({ entries: [...draft.entries.slice(0, index + 1), '', ...draft.entries.slice(index + 1)] });
+    onChange([...entries.slice(0, index + 1), '', ...entries.slice(index + 1)]);
   }
   useEffect(() => {
     if (focusAt.current === null) return;
@@ -132,28 +134,55 @@ export function BoardForm({ draft, now, onChange, onError }: {
     focusAt.current = null;
     input?.focus();
     input?.setSelectionRange(input.value.length, input.value.length);
-  }, [draft.entries]);
+  }, [entries]);
   return <>
-    <Heading title="公告内容" hint="多行可直接粘贴" />
-    <Input className="title-input" aria-label="公告标题" placeholder="标题（默认为“公告”）" maxLength={30} value={draft.title} onChange={e => onChange({ title: e.target.value })} />
-    <ol className="entry-list" ref={list}>{draft.entries.map((entry, index) => <li key={index} className="entry-row">
+    <ol className="entry-list" ref={list}>{entries.map((entry, index) => <li key={index} className="entry-row">
       <span className="entry-number">{index + 1}</span>
       <Input aria-label={`第 ${index + 1} 条`} placeholder="公告内容" value={entry} className={chars(entry) > BOARD_ENTRY_LIMIT ? 'invalid' : ''}
         onChange={e => setEntry(index, e.target.value)} onPaste={e => paste(index, e)} onKeyDown={e => enter(index, e)} />
-      {draft.entries.length > 1 && <Button type="button" variant="ghost" className="icon-action" aria-label={`删除第 ${index + 1} 条`}
-        onClick={() => onChange({ entries: draft.entries.filter((_, at) => at !== index) })}><X size={18} /></Button>}
+      {entries.length > 1 && <Button type="button" variant="ghost" className="icon-action" aria-label={`删除第 ${index + 1} 条`}
+        onClick={() => onChange(entries.filter((_, at) => at !== index))}><X size={18} /></Button>}
     </li>)}</ol>
-    {draft.entries.length < BOARD_ENTRIES && <Button type="button" variant="outline" className="action add-entry"
-      onClick={() => onChange({ entries: [...draft.entries, ''] })}><Plus size={17} />添加一条</Button>}
+    {entries.length < BOARD_ENTRIES && <Button type="button" variant="outline" className="action add-entry"
+      onClick={() => onChange([...entries, ''])}><Plus size={17} />添加一条</Button>}
+  </>;
+}
+
+// Ten minutes ahead on the 5-minute grid, as a local "YYYY-MM-DDTHH:mm".
+const soonAt = (now: number) => localInput(Math.ceil((now + 600_000) / 300_000) * 300_000);
+
+export function BoardForm({ draft, now, onChange, onError }: {
+  draft: BoardDraft; now: number; onChange: (change: Partial<BoardDraft>) => void; onError: (message: string) => void;
+}) {
+  const start = draft.publishAt ? Date.parse(draft.publishAt) : now;
+  // A set end time moves with the publish day, so a template's 08:30 stays on the day the board appears.
+  function publishAt(next: string) {
+    const days = daysUntil(localDate(next ? Date.parse(next) : now), start);
+    onChange({ publishAt: next, endAt: draft.endAt && shiftDays(draft.endAt, days) });
+  }
+  const [publishDate, publishTime] = draft.publishAt.split('T');
+  return <>
+    <Heading title="公告内容" hint={draft.draftId ? '正在编辑已保存的公告' : '多行可直接粘贴'}
+      extra={BOARD_TEMPLATES.map(item => <button type="button" key={item.label} className="template-chip"
+        onClick={() => onChange({ title: item.title, endAt: `${localDate(start)}T${item.end}` })}>{item.label}</button>)}
+      action={draft.draftId && <Button type="button" variant="link" className="heading-action" onClick={() => onChange(blankBoard())}>取消编辑</Button>} />
+    <Input className="title-input" aria-label="公告标题" placeholder="标题（默认为“公告”）" maxLength={30} value={draft.title} onChange={e => onChange({ title: e.target.value })} />
+    <EntryList entries={draft.entries} onChange={entries => onChange({ entries })} onError={onError} />
     <div className="broadcast-options">
-      <Option label="背景"><div className="choice-row">
+      <Option label="背景"><div className="choice-row theme-row">
         {BOARD_THEMES.map(theme => <button type="button" key={theme.id} className={'theme-choice theme-' + theme.id + (draft.theme === theme.id ? ' active' : '')}
           aria-pressed={draft.theme === theme.id} onClick={() => onChange({ theme: theme.id })}><ThemeArt theme={theme.id} /><span>{theme.label}</span></button>)}
       </div></Option>
-      <EndPicker endAt={draft.endAt} now={now} onChange={endAt => onChange({ endAt })} />
-      <Choices legend="显示时朗读" value={draft.speak ? 'yes' : 'no'} options={[{ id: 'no', label: '不朗读' }, { id: 'yes', label: '朗读一遍' }]}
-        onChange={value => onChange({ speak: value === 'yes' })} />
-      {draft.speak && <VoicePicker value={draft.voiceType} onChange={voiceType => onChange({ voiceType })} onError={onError} />}
+      <Option label="发布时间"><div className="choice-row">
+        <button type="button" className={draft.publishAt ? '' : 'active'} aria-pressed={!draft.publishAt} onClick={() => publishAt('')}>立即</button>
+        <button type="button" className={draft.publishAt ? 'active' : ''} aria-pressed={!!draft.publishAt}
+          onClick={() => !draft.publishAt && publishAt(soonAt(now))}>定时</button>
+        {draft.publishAt && <>
+          <DatePick value={publishDate} label="发布日期" now={now} min={localDate(now)} onChange={date => publishAt(`${date}T${publishTime}`)} />
+          <TimeSelect value={publishTime} label="发布时间" onChange={time => publishAt(`${publishDate}T${time}`)} />
+        </>}
+      </div></Option>
+      <EndPicker endAt={draft.endAt} now={now} from={start} onChange={endAt => onChange({ endAt })} />
     </div>
   </>;
 }
@@ -186,7 +215,7 @@ const realDate = (digits: string) => {
   return digits.length === 8 && date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
 };
 
-function DateInput({ value, now, onChange }: { value: string; now: number; onChange: (date: string) => void }) {
+export function DateInput({ value, now, onChange }: { value: string; now: number; onChange: (date: string) => void }) {
   const [digits, setDigits] = useState(value.replaceAll('-', ''));
   const input = useRef<HTMLInputElement>(null);
   function edit(raw: string) {

@@ -1,7 +1,10 @@
-import { useEffect, useRef, type ReactNode } from 'react';
-import { Volume2 } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CalendarDays, Volume2 } from 'lucide-react';
+import { zhCN } from 'react-day-picker/locale';
 import { Button } from '@/components/ui/button';
-import { EMOTIONS, VOICES, endOfToday, localInput, pad, weekday, type Emotion } from '@/lib/domain';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { EMOTIONS, END_DAYS, VOICES, daysUntil, endOfDay, localDate, pad, weekday, type Emotion } from '@/lib/domain';
 
 const previewUrl = (voice: number) => `${import.meta.env.BASE_URL}voice-previews/${voice}.wav`;
 
@@ -65,20 +68,36 @@ export function TimeSelect({ value, label, onChange }: { value: string; label: s
   </span>;
 }
 
-export function EndPicker({ endAt, now, onChange }: { endAt: string; now: number; onChange: (endAt: string) => void }) {
-  const value = endAt || endOfToday(now);
+const asDate = (value: string) => new Date(`${value}T00:00`);
+
+function dayLabel(value: string, now: number): string {
+  const offset = daysUntil(value, now);
+  if (offset >= 0 && offset <= 2) return ['今天', '明天', '后天'][offset];
+  const d = asDate(value);
+  const year = d.getFullYear() === new Date(now).getFullYear() ? '' : `${d.getFullYear()}年`;
+  return `${year}${d.getMonth() + 1}月${d.getDate()}日 ${weekday(d)}`;
+}
+
+// A "YYYY-MM-DD" picked from a calendar that opens below the button, limited to min up to END_DAYS from today.
+export function DatePick({ value, label, now, min, onChange }: { value: string; label: string; now: number; min: string; onChange: (date: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const last = new Date(now); last.setDate(last.getDate() + END_DAYS);
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger className="date-pick" aria-label={label}><CalendarDays size={17} />{dayLabel(value, now)}</PopoverTrigger>
+    <PopoverContent className="date-popover" align="start">
+      <Calendar mode="single" locale={zhCN} formatters={{ formatCaption: d => `${d.getFullYear()}年${d.getMonth() + 1}月` }} required selected={asDate(value)} defaultMonth={asDate(value)} startMonth={asDate(min)} endMonth={last}
+        disabled={[{ before: asDate(min) }, { after: last }]} onSelect={date => { onChange(localDate(date.getTime())); setOpen(false); }} />
+    </PopoverContent>
+  </Popover>;
+}
+
+// An empty endAt means the end of the day the item starts (from), which is today unless it is scheduled.
+export function EndPicker({ endAt, now, from = now, onChange }: { endAt: string; now: number; from?: number; onChange: (endAt: string) => void }) {
+  const value = endAt || endOfDay(from);
   const [date, time] = value.split('T');
-  const days = Array.from({ length: 7 }, (_, offset) => {
-    const d = new Date(now); d.setDate(d.getDate() + offset);
-    const label = ['今天', '明天', '后天'][offset] ?? `${d.getMonth() + 1}月${d.getDate()}日 ${weekday(d)}`;
-    return { id: localInput(d.getTime()).slice(0, 10), label };
-  });
-  if (!days.some(day => day.id === date)) days.unshift({ id: date, label: date });
   return <Option label="结束时间"><div className="choice-row">
-    <span className="time-select"><select aria-label="结束日期" value={date} onChange={e => onChange(`${e.target.value}T${time}`)}>
-      {days.map(day => <option key={day.id} value={day.id}>{day.label}</option>)}
-    </select></span>
+    <DatePick value={date} label="结束日期" now={now} min={localDate(from)} onChange={next => onChange(`${next}T${time}`)} />
     <TimeSelect value={time} label="结束时间" onChange={next => onChange(`${date}T${next}`)} />
-    {value !== endOfToday(now) && <button type="button" onClick={() => onChange('')}>今天结束</button>}
+    {value !== endOfDay(from) && <button type="button" onClick={() => onChange('')}>{localDate(from) === localDate(now) ? '今天结束' : '当天结束'}</button>}
   </div></Option>;
 }

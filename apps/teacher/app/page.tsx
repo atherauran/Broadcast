@@ -4,12 +4,13 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ArrowUpRight, AudioLines, CalendarDays, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, configured, getClassrooms, getHistory, getOverview, getSchedules, once, rpc, supabase } from '@/lib/api';
-import { CLASSROOM_IDS, boardEntries, endOfToday, isOnline, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, todayAt, validTeacherName,
-  type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind, type Schedule, type Week } from '@/lib/domain';
+import { adminEmail, configured, getBoardDrafts, getClassrooms, getHistory, getOverview, getSchedules, once, rpc, supabase } from '@/lib/api';
+import { CLASSROOM_IDS, boardEntries, endOfDay, isOnline, localInput, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+  todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
+  type SavedBoard, type Schedule, type Week } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
-import { initialDrafts, type Drafts, type Patch } from './compose/drafts';
+import { blankBoard, initialDrafts, type Drafts, type Patch } from './compose/drafts';
 import { History, Receipts, broadcastMeta, time } from './history';
 import { OnScreen } from './on-screen';
 import { Devices } from './devices';
@@ -19,7 +20,8 @@ const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, 
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
 const teacherKey = 'broadcast-teacher-session-v2';
 const rememberedTeacher = () => localStorage.getItem(teacherKey)?.trim() || '';
-const endsAt = (endAt: string, now: number) => ({ p_ends_at: new Date(endAt || endOfToday(now)).toISOString() });
+// An empty endAt means the end of the day the item starts.
+const endsAt = (endAt: string, start: number) => new Date(endAt || endOfDay(start)).toISOString();
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -34,6 +36,7 @@ export default function App() {
   const [history, setHistory] = useState<Broadcast[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [overview, setOverview] = useState<DisplayItem[]>([]);
+  const [boardDrafts, setBoardDrafts] = useState<BoardDraftRow[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [weekDrafts, setWeekDrafts] = useState<Record<string, Week>>({});
   const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'schedule' | 'devices'>('send');
@@ -106,8 +109,8 @@ export default function App() {
     const load = async () => {
       try {
         await refreshRooms();
-        const [items, weeks] = await Promise.all([getHistory(), getSchedules(), refreshOverview()]);
-        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); }
+        const [items, weeks, saved] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), refreshOverview()]);
+        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); }
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
@@ -118,6 +121,10 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'display_items' }, payload => {
         const removal = payload.eventType === 'DELETE';
         setOverview(old => patchDisplayItems(old, removal, (removal ? payload.old : payload.new) as DisplayRow));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'board_drafts' }, payload => {
+        const removal = payload.eventType === 'DELETE';
+        setBoardDrafts(old => patchBoardDrafts(old, removal, (removal ? payload.old : payload.new) as BoardDraftRow));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, payload => {
         if (payload.eventType !== 'DELETE') setSchedules(old => patchSchedule(old, payload.new as Schedule));
@@ -162,7 +169,7 @@ export default function App() {
       const { error } = await supabase!.auth.signOut({ scope: 'local' });
       if (error) throw error;
       localStorage.removeItem(teacherKey);
-      setTeacherName(''); setHistory([]); setOverview([]); setSchedules([]); setWeekDrafts({}); setRooms(emptyRooms);
+      setTeacherName(''); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setRooms(emptyRooms);
     });
   }
   async function login() {
@@ -183,6 +190,36 @@ export default function App() {
     // While live, the new delivery rows arrive over Realtime and fetch this broadcast themselves.
     if (!live) await getHistory(null, id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
   }
+  const boardContent = () => {
+    const b = drafts.board;
+    // Boards are never read aloud; the server still expects the reading fields.
+    return { title: b.title.trim(), entries: boardEntries(b.entries), speak: false, voice_type: 101001, theme: b.theme };
+  };
+  // Saving under the same id replaces the earlier draft or schedule; without publishAt it stays a draft.
+  async function saveBoard(publishAt: string) {
+    const b = drafts.board;
+    const start = publishAt ? Date.parse(publishAt) : now;
+    await rpc('save_board_draft', { p_id: b.draftId ?? crypto.randomUUID(), p_content: boardContent(), p_classrooms: [...selected].sort(),
+      p_teacher_name: teacherName, p_ends_at: publishAt || b.endAt ? endsAt(b.endAt, start) : null, p_publish_at: publishAt ? new Date(start).toISOString() : null });
+    if (!live) await Promise.all([getBoardDrafts().then(setBoardDrafts), refreshOverview()]);
+  }
+  function saveDraft() {
+    void run('draft', async () => { await saveBoard(''); patch('board', blankBoard()); });
+  }
+  function openSaved(board: SavedBoard) {
+    const { content } = board;
+    patch('board', { title: content.title, entries: content.entries, theme: content.theme ?? 'plain',
+      endAt: board.ends_at ? localInput(Date.parse(board.ends_at)) : '', publishAt: board.publish_at ? localInput(Date.parse(board.publish_at)) : '', draftId: board.id });
+    setSelected(board.classrooms);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function deleteSaved(id: string) {
+    void run('draft', async () => {
+      await rpc('delete_board_draft', { p_id: id });
+      if (drafts.board.draftId === id) patch('board', { draftId: null });
+      if (!live) await Promise.all([getBoardDrafts().then(setBoardDrafts), refreshOverview()]);
+    });
+  }
   async function createDisplay(display: 'board' | 'note' | 'countdown', content: object, times: object) {
     const classrooms = [...selected].sort();
     await once('display-attempt', [display, content, times, classrooms, teacherName], id =>
@@ -202,10 +239,15 @@ export default function App() {
           p_voice_type: 101001, p_style: 'banner', p_banner_position: b.position });
       } else if (kind === 'board') {
         const b = drafts.board;
-        await createDisplay('board', { title: b.title.trim(), entries: boardEntries(b.entries), speak: b.speak, voice_type: b.voiceType, theme: b.theme }, endsAt(b.endAt, now));
-        patch('board', { title: '', entries: [''] });
+        if (b.publishAt) await saveBoard(b.publishAt);
+        else {
+          await createDisplay('board', boardContent(), { p_ends_at: endsAt(b.endAt, now) });
+          // Published from a saved board, which is no longer needed.
+          if (b.draftId) await rpc('delete_board_draft', { p_id: b.draftId });
+        }
+        patch('board', blankBoard());
       } else if (kind === 'note') {
-        await createDisplay('note', { text: drafts.note.text.trim(), color: drafts.note.color }, endsAt(drafts.note.endAt, now));
+        await createDisplay('note', { text: drafts.note.text.trim(), color: drafts.note.color }, { p_ends_at: endsAt(drafts.note.endAt, now) });
         patch('note', { text: '' });
       } else {
         const c = drafts.countdown;
@@ -258,7 +300,8 @@ export default function App() {
       {sw.needRefresh[0] && <div className="feedback info">有新版本可用<Button variant="link" onClick={() => void sw.updateServiceWorker(true)} disabled={!!busy}>更新应用</Button></div>}
       {tab === 'send' && <>
         <Compose kind={kind} setKind={setKind} rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected}
-          drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError} />
+          drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
+          saved={savedBoards(boardDrafts, overview, now)} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
         {latest && <section className="section delivery-panel" aria-live="polite">
           <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
           <p className="broadcast-body">{latest.body}</p>
@@ -271,7 +314,10 @@ export default function App() {
         </button>}
       </>}
       {tab === 'screen' && <OnScreen items={overview} rooms={rooms} known={known} now={now} ready={ready} busy={busy}
-        onRemove={ids => run('remove', async () => { await rpc('remove_display_items', { p_ids: ids }); if (!live) await refreshOverview(); })} />}
+        onRemove={ids => run('remove', async () => { await rpc('remove_display_items', { p_ids: ids }); if (!live) await refreshOverview(); })}
+        onEdit={(ids, content, ends) => run('edit', async () => {
+          await rpc('update_display_items', { p_ids: ids, p_content: content, p_ends_at: ends }); if (!live) await refreshOverview();
+        })} onError={setError} />}
       {tab === 'history' && <History history={history} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
         onResend={resend} rooms={rooms} known={known} now={now} configured={configured} />}

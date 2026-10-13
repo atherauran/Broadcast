@@ -192,7 +192,8 @@ describe('display items', () => {
     await expect(show('board', { entries: ['字'.repeat(301)], speak: false, voice_type: 101001 })).rejects.toThrow('300');
     await expect(show('note', { text: '颜色', color: 'red' })).rejects.toThrow('颜色');
     await expect(show('note', { text: '过去', color: 'red' }, ['8-1'], { end: new Date(Date.now() - 1000).toISOString() })).rejects.toThrow();
-    await expect(show('note', { text: '太远', color: 'yellow' }, ['8-1'], { end: new Date(Date.now() + 8 * 86_400_000).toISOString() })).rejects.toThrow('结束时间');
+    await show('note', { text: '一年', color: 'yellow' }, ['8-2'], { end: new Date(Date.now() + 365 * 86_400_000).toISOString() });
+    await expect(show('note', { text: '太远', color: 'yellow' }, ['8-1'], { end: new Date(Date.now() + 401 * 86_400_000).toISOString() })).rejects.toThrow('结束时间');
   });
   it('is idempotent per request and refuses a conflicting retry', async () => {
     await clearDisplay(); const id = crypto.randomUUID(); const end = new Date(Date.now() + 3_600_000).toISOString();
@@ -213,6 +214,57 @@ describe('display items', () => {
     await clearDisplay(); await show('note', { text: '全校', color: 'yellow' }, ['8-1', '8-4']);
     await identity(admin, 'admin'); const overview = await scalar<{ items: { classroom_id: string; teacher_name: string }[] }>('select display_overview()');
     expect(overview.items.map(i => i.classroom_id)).toEqual(['8-1', '8-4']); expect(overview.items[0].teacher_name).toBe('李老师');
+  });
+});
+describe('board drafts, scheduled boards and edits', () => {
+  const board = { title: '晨会通知', entries: ['升旗仪式'], speak: false, voice_type: 101001 };
+  const later = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+  const save = (id: string, extra: { classes?: string[]; end?: string | null; publish?: string | null; content?: object } = {}) =>
+    db.query('select save_board_draft($1,$2,$3,$4,$5::timestamptz,$6::timestamptz)',
+      [id, JSON.stringify(extra.content ?? board), extra.classes ?? ['8-1'], '周老师', extra.end ?? null, extra.publish ?? null]);
+  const drafts = async () => (await db.query<{ id: string }>('select id from board_drafts')).rows.map(r => r.id);
+  it('keeps a draft without showing it, then schedules it to appear later', async () => {
+    await clearDisplay(); const id = crypto.randomUUID();
+    await identity(admin, 'admin'); await save(id, { classes: [] }); await save(id, { classes: [] });
+    expect(await drafts()).toEqual([id]); expect(await screen()).toHaveLength(0);
+    await identity(admin, 'admin'); await expect(save(id, { classes: [], publish: later(60), end: later(120) })).rejects.toThrow('请选择班级');
+    await expect(save(id, { publish: later(60), end: later(30) })).rejects.toThrow('结束时间');
+    await expect(save(id, { publish: later(-1), end: later(30) })).rejects.toThrow('发布时间');
+    await save(id, { classes: ['8-1', '8-2'], publish: later(60), end: later(120) });
+    expect(await drafts()).toEqual([]);
+    const items = await screen(); expect(items).toHaveLength(1); expect(Date.parse(items[0].starts_at)).toBeGreaterThan(Date.now() + 3_500_000);
+    await identity(admin, 'admin'); await save(id, { classes: ['8-2'], publish: later(30), end: later(120) });
+    expect(await screen()).toHaveLength(0); expect(await screen(second)).toHaveLength(1);
+    await identity(admin, 'admin'); await save(id, { classes: ['8-2'] });
+    expect(await drafts()).toEqual([id]); expect(await screen(second)).toHaveLength(0);
+  });
+  it('deletes drafts and pending boards, but never a board already shown', async () => {
+    await clearDisplay(); const id = crypto.randomUUID();
+    await identity(admin, 'admin'); await save(id, { publish: later(60), end: later(120) });
+    await db.query('select delete_board_draft($1)', [id]); expect(await screen()).toHaveLength(0);
+    const shown = crypto.randomUUID(); await identity(admin, 'admin'); await save(shown, { publish: later(60), end: later(120) });
+    await db.exec('reset role'); await db.query("update display_items set starts_at=clock_timestamp()-interval '1 minute' where request_id=$1", [shown]);
+    await identity(admin, 'admin'); await expect(save(shown)).rejects.toThrow('已经发布');
+    await db.query('select delete_board_draft($1)', [shown]); expect(await screen()).toHaveLength(1);
+  });
+  it('edits content and end time of items on screen', async () => {
+    await clearDisplay(); const id = await show('board', board, ['8-1', '8-2']);
+    const ids = [await rowId(id), await rowId(id, '8-2')];
+    const edit = (content: object, end: string, targets = ids) => db.query('select update_display_items($1,$2,$3::timestamptz)', [targets, JSON.stringify(content), end]);
+    await identity(admin, 'admin'); await edit({ ...board, entries: ['改到操场'] }, later(90));
+    const items = await screen(); expect(items[0].content.entries).toEqual(['改到操场']);
+    await identity(admin, 'admin'); await expect(edit({ ...board, entries: [] }, later(90))).rejects.toThrow('1–12');
+    await expect(edit(board, later(-1))).rejects.toThrow('结束时间');
+    const note = await rowId(await show('note', { text: '便签', color: 'pink' }));
+    await identity(admin, 'admin'); await expect(edit(board, later(90), [ids[0], note])).rejects.toThrow('同一类');
+    const timer = await rowId(await show('countdown', { label: '考试' }, ['8-1'], { duration: 600 }));
+    await identity(admin, 'admin'); await expect(edit({ label: '考试' }, later(13 * 60), [timer])).rejects.toThrow('12 小时');
+    await edit({ label: '期中考试', fullscreen: false }, later(30), [timer]);
+    expect((await screen()).find(i => i.kind === 'countdown')?.content.label).toBe('期中考试');
+    await identity(third); await expect(edit(board, later(90))).rejects.toThrow('管理员');
+    await expect(save(crypto.randomUUID())).rejects.toThrow('管理员');
+    await expect(db.query('select delete_board_draft($1)', [id])).rejects.toThrow('管理员');
+    await expect(db.query('select count(*) from board_drafts')).resolves.toMatchObject({ rows: [{ count: 0 }] });
   });
 });
 describe('board themes and schedules', () => {

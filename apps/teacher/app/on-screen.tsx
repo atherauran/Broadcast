@@ -3,6 +3,7 @@ import { Check, ChevronRight, ClipboardList, StickyNote, Timer } from 'lucide-re
 import { Button } from '@/components/ui/button';
 import { clockText, daysUntil, isOnline, remaining, type Classroom, type DisplayItem } from '@/lib/domain';
 import { roomStatus } from './class-picker';
+import { EditItem } from './edit-item';
 
 const icons = { board: ClipboardList, note: StickyNote, countdown: Timer };
 const kindLabel = { board: '公告板', note: '便签', countdown: '倒计时' };
@@ -15,18 +16,25 @@ function summary(item: DisplayItem, now: number): string {
   return `${label} · 剩余 ${remaining(Date.parse(item.ends_at) - now)}`;
 }
 
-// Items are ticked, possibly across classes, and removed together from the bar that appears at the bottom.
-export function OnScreen({ items, rooms, known, now, ready, busy, onRemove }: {
+// Items are ticked, possibly across classes, and removed or edited together from the bar that appears at the bottom.
+export function OnScreen({ items, rooms, known, now, ready, busy, onRemove, onEdit, onError }: {
   items: DisplayItem[]; rooms: Classroom[]; known: boolean; now: number; ready: boolean; busy: string;
-  onRemove: (ids: string[]) => Promise<boolean>;
+  onRemove: (ids: string[]) => Promise<boolean>; onEdit: (ids: string[], content: object, endsAt: string) => Promise<boolean>;
+  onError: (message: string) => void;
 }) {
   const [open, setOpen] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
-  const live = items.filter(item => Date.parse(item.ends_at) > now);
+  const [editing, setEditing] = useState(false);
+  // Scheduled boards that have not appeared yet are listed with the board drafts instead.
+  const live = items.filter(item => Date.parse(item.starts_at) <= now && Date.parse(item.ends_at) > now);
   // Items that ended or were removed elsewhere drop out of the selection on their own.
   const selected = picked.filter(id => live.some(item => item.id === id));
+  const chosen = live.filter(item => selected.includes(item.id));
+  // Only items showing the same thing, such as one board sent to several classes, can be edited together.
+  const editable = chosen.length > 0 && chosen.every(item => item.kind === chosen[0].kind && JSON.stringify(item.content) === JSON.stringify(chosen[0].content));
   const toggle = (ids: string[], on: boolean) => setPicked(old => on ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
   async function remove() { if (await onRemove(selected)) setPicked([]); }
+  async function edit(content: object, endsAt: string) { if (await onEdit(selected, content, endsAt)) { setEditing(false); setPicked([]); } }
 
   return <section className="history-section">
     <div className="section-heading"><h1>正在显示</h1><span className="muted">公告板、便签和倒计时</span></div>
@@ -66,7 +74,9 @@ export function OnScreen({ items, rooms, known, now, ready, busy, onRemove }: {
     {selected.length > 0 && <div className="selection-bar">
       <span>已选择 <strong>{selected.length}</strong> 项</span>
       <Button variant="outline" className="action" onClick={() => setPicked([])}>取消</Button>
+      {editable && <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => setEditing(true)}>编辑</Button>}
       <Button className="action primary" disabled={!ready || !!busy} onClick={() => void remove()}>{busy === 'remove' ? '移除中…' : '移除'}</Button>
     </div>}
+    {editing && editable && <EditItem item={chosen[0]} now={now} ready={ready} busy={busy} onClose={() => setEditing(false)} onSave={edit} onError={onError} />}
   </section>;
 }

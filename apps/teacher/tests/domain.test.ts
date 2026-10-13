@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfToday, localInput, endError, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { daysUntil, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -37,17 +37,31 @@ describe('display styles', () => {
     expect(validNote('字'.repeat(60))).toBe(true); expect(validNote('字'.repeat(61))).toBe(false);
   });
   it('defaults the end time to the end of the local day', () => {
-    expect(localInput(local)).toBe('2026-10-04T14:03'); expect(endOfToday(local)).toBe('2026-10-04T23:59');
+    expect(localInput(local)).toBe('2026-10-04T14:03'); expect(endOfDay(local)).toBe('2026-10-04T23:59');
+    expect(shiftDays('2026-10-31T08:30', 1)).toBe('2026-11-01T08:30');
     expect(todayAt(local, '15:40')).toBe(new Date(2026, 9, 4, 15, 40).getTime()); expect(soonTime(local)).toBe('14:15');
   });
   it('explains impossible times', () => {
     expect(endError('', local)).toBe(''); expect(endError('2026-10-04T14:00', local)).toBe('结束时间已过');
-    expect(endError('2026-10-12T14:00', local)).toBe('最多显示 7 天');
+    expect(endError('2027-10-04T14:00', local)).toBe(''); expect(endError('2027-10-06T14:00', local)).toBe('最多显示一年');
+    const tomorrow = new Date(2026, 9, 5, 7, 30).getTime();
+    expect(endError('', local, tomorrow)).toBe(''); expect(endError('2026-10-05T07:00', local, tomorrow)).toBe('结束时间需晚于发布时间');
+    expect(publishError('', local)).toBe(''); expect(publishError('2026-10-04T14:00', local)).toBe('发布时间已过'); expect(publishError('2026-10-05T07:30', local)).toBe('');
     expect(countdownError('duration', 25, '', local)).toBe(''); expect(countdownError('duration', 0, '', local)).not.toBe('');
     expect(countdownError('days', 0, '', local, '')).toBe(''); expect(countdownError('days', 0, '', local, '2026-10-04')).toBe(''); expect(countdownError('days', 0, '', local, '2026-10-03')).toBe('日期已过'); expect(countdownError('days', 0, '', local, '2028-01-01')).not.toBe('');
     expect(daysUntil('2026-10-06', local)).toBe(2);
     expect(pastedLines('1. 带水杯\n2、交作业\r\n\n(3) 大扫除\n2024年开学')).toEqual(['带水杯', '交作业', '大扫除', '2024年开学']);
     expect(countdownError('until', 0, '13:00', local)).toBe('结束时间已过'); expect(countdownError('until', 0, '15:40', local)).toBe('');
+  });
+  it('lists scheduled boards by start time before drafts, one per request', () => {
+    const content = { title: '晨会通知', entries: ['升旗'], speak: false, voice_type: 101001 };
+    const board = (id: string, request: string, classroom: string, start: number): DisplayItem => ({ id, request_id: request, classroom_id: classroom, kind: 'board', content,
+      starts_at: new Date(start).toISOString(), ends_at: new Date(start + 3_600_000).toISOString(), teacher_name: '李老师', created_at: new Date(local).toISOString() });
+    const items = [board('a1', 'late', '8-1', local + 7_200_000), board('a2', 'late', '8-2', local + 7_200_000), board('b', 'soon', '8-3', local + 60_000),
+      board('c', 'shown', '8-1', local - 60_000)];
+    const draft = { id: 'draft', content, classrooms: [], ends_at: null, teacher_name: '王老师', updated_at: new Date(local).toISOString() };
+    const list = savedBoards([draft], items, local);
+    expect(list.map(b => [b.id, b.classrooms, !!b.publish_at])).toEqual([['soon', ['8-3'], true], ['late', ['8-1', '8-2'], true], ['draft', [], false]]);
   });
   it('formats the remaining countdown time', () => {
     expect(remaining(25 * 60_000)).toBe('25:00'); expect(remaining(3_725_000)).toBe('1:02:05'); expect(remaining(-5)).toBe('00:00');

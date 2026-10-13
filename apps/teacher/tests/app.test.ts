@@ -83,7 +83,7 @@ it('picks the type first and shows only the options that apply', async () => {
   await act(async () => radio('公告板').click());
   expect(host.querySelector('[aria-label="结束日期"]')).not.toBeNull(); expect(host.textContent).not.toContain('定时显示');
   expect(host.textContent).not.toContain('试听');
-  await click('朗读一遍'); expect(host.textContent).toContain('试听');
+  expect(host.textContent).not.toContain('朗读');
   await click('添加一条'); expect(host.querySelectorAll('.entry-row')).toHaveLength(2);
   const entries = () => Array.from(host.querySelectorAll<HTMLInputElement>('.entry-row input'));
   const press = (input: HTMLInputElement, isComposing = false) => act(async () => {
@@ -113,7 +113,7 @@ it('folds each class on the on-screen tab and removes ticked items together', as
     content: { text, color: 'yellow' }, starts_at: new Date(now).toISOString(), ends_at: new Date(now + 3_600_000).toISOString(), teacher_name: '李老师',
     created_at: new Date(now).toISOString() });
   const items = [note('a1', 'a', '8-1', '带水杯'), note('a2', 'a', '8-2', '带水杯'), note('b', 'b', '8-1', '交作业')];
-  await act(async () => root.render(createElement(OnScreen, { items, rooms, known: false, now, ready: true, busy: '', onRemove })));
+  await act(async () => root.render(createElement(OnScreen, { items, rooms, known: false, now, ready: true, busy: '', onRemove, onEdit: vi.fn(), onError: vi.fn() })));
   const headings = () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
   expect(headings()[0].getAttribute('aria-expanded')).toBe('false'); expect(host.textContent).not.toContain('带水杯');
   expect(headings()[2].disabled).toBe(true); expect(headings()[2].textContent).toContain('没有显示内容');
@@ -126,6 +126,45 @@ it('folds each class on the on-screen tab and removes ticked items together', as
   await click('移除', host.querySelector('.selection-bar')!);
   expect(onRemove).toHaveBeenCalledWith(['b', 'a1', 'a2']); expect(host.querySelector('.selection-bar')).toBeNull();
   await act(async () => headings()[0].click()); expect(host.textContent).not.toContain('带水杯');
+});
+it('edits items that show the same thing, and hides boards that have not appeared yet', async () => {
+  const now = Date.now(); const onEdit = vi.fn(async () => true);
+  const rooms: Classroom[] = ['8-1', '8-2'].map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
+  const at = (ms: number) => new Date(ms).toISOString();
+  const content = { title: '通知', entries: ['带水杯'], speak: false, voice_type: 101001, theme: 'plain' as const };
+  const board = (id: string, classroom: string, start: number, title = content.title): DisplayItem => ({ id, request_id: id[0], classroom_id: classroom, kind: 'board',
+    content: { ...content, title }, starts_at: at(start), ends_at: at(now + 3_600_000), teacher_name: '李老师', created_at: at(now) });
+  const items = [board('a1', '8-1', now), board('a2', '8-2', now), board('b', '8-1', now, '作业'), board('later', '8-2', now + 600_000, '明天的')];
+  await act(async () => root.render(createElement(OnScreen, { items, rooms, known: false, now, ready: true, busy: '', onRemove: vi.fn(), onEdit, onError: vi.fn() })));
+  const headings = () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
+  await act(async () => headings()[0].click()); await act(async () => headings()[1].click());
+  expect(host.textContent).not.toContain('明天的');
+  const select = (text: string, index = 0) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-select')).filter(b => b.textContent?.includes(text))[index].click());
+  await select('通知'); await select('通知', 1);
+  expect(host.querySelector('.selection-bar')?.textContent).toContain('编辑');
+  await select('作业'); expect(host.querySelector('.selection-bar')?.textContent).not.toContain('编辑');
+  await select('作业'); await click('编辑', host.querySelector('.selection-bar')!);
+  const entry = document.querySelector<HTMLInputElement>('.edit-card [aria-label="第 1 条"]')!;
+  expect(entry.value).toBe('带水杯');
+  await type(entry, '带水杯和雨伞');
+  await click('保存', document.querySelector('.edit-card')!);
+  expect(onEdit).toHaveBeenCalledWith(['a1', 'a2'], { ...content, entries: ['带水杯和雨伞'] }, at(now + 3_600_000));
+  expect(document.querySelector('.edit-card')).toBeNull(); expect(host.querySelector('.selection-bar')).toBeNull();
+});
+it('fills the morning meeting template and schedules a board for later', async () => {
+  const radio = (label: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('.kind-card')).find(b => b.textContent === label)!;
+  await act(async () => radio('公告板').click());
+  await click('晨会通知');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="公告标题"]')?.value).toBe('晨会通知');
+  const time = (label: string) => [host.querySelector<HTMLSelectElement>(`[aria-label="${label}（时）"]`)!.value, host.querySelector<HTMLSelectElement>(`[aria-label="${label}（分）"]`)!.value].join(':');
+  expect(time('结束时间')).toBe('08:30');
+  expect(host.querySelector('[aria-label="发布日期"]')).toBeNull();
+  await click('定时');
+  expect(host.querySelector('[aria-label="发布日期"]')).not.toBeNull();
+  expect(Array.from(host.querySelectorAll('button')).some(b => b.textContent?.trim() === '定时发布')).toBe(true);
+  expect(Array.from(host.querySelectorAll('button')).some(b => b.textContent?.trim() === '存草稿')).toBe(true);
+  await click('立即');
+  expect(host.querySelector('[aria-label="发布日期"]')).toBeNull();
 });
 it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   await click('课程表'); expect(host.querySelector('.day-tabs')).toBeNull();

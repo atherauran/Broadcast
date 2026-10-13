@@ -22,6 +22,8 @@ export const TEMPLATES: { label: string; text: string }[] = [
   { label: '戴好红领巾', text: '戴好红领巾' },
   { label: '回到座位，保持安静', text: '回到座位，保持安静' },
 ];
+// Board templates fill the title and end the board at a fixed time on the day it appears.
+export const BOARD_TEMPLATES = [{ label: '晨会通知', title: '晨会通知', end: '08:30' }];
 export interface Classroom {
   id: string; device_id: string | null; device_name: string | null;
   last_seen_at: string | null; connected: boolean;
@@ -63,7 +65,7 @@ export const COUNTDOWN_MINUTES = [5, 10, 15, 25, 45];
 export type BoardTheme = 'plain' | 'festive' | 'joyful' | 'fresh' | 'tech' | 'safety';
 export const BOARD_THEMES: { id: BoardTheme; label: string }[] = [
   { id: 'plain', label: '简洁' }, { id: 'festive', label: '节日' }, { id: 'joyful', label: '欢快' },
-  { id: 'fresh', label: '清新' }, { id: 'tech', label: '科技' }, { id: 'safety', label: '安全提醒' },
+  { id: 'fresh', label: '清新' }, { id: 'tech', label: '科技' }, { id: 'safety', label: '提醒' },
 ];
 export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number; theme?: BoardTheme }
 export interface NoteContent { text: string; color: NoteColor }
@@ -103,6 +105,31 @@ export function patchDelivery(history: Broadcast[], row: DeliveryRow): Broadcast
 export function patchRoom(rooms: Classroom[], device: { id: string; name: string; last_seen_at: string | null; connected: boolean }): Classroom[] {
   return rooms.map(room => room.device_id === device.id
     ? { ...room, device_name: device.name, last_seen_at: device.last_seen_at, connected: device.connected } : room);
+}
+// A board saved for later: a draft (no publish_at) or scheduled boards that have not appeared yet.
+export interface SavedBoard {
+  id: string; content: BoardContent; classrooms: string[]; ends_at: string | null; publish_at: string | null;
+  teacher_name: string; updated_at: string;
+}
+export type BoardDraftRow = Omit<SavedBoard, 'publish_at'>;
+// Scheduled boards are display items whose start lies ahead; each request is one saved board across its classes.
+export function savedBoards(drafts: BoardDraftRow[], items: DisplayItem[], now: number): SavedBoard[] {
+  const scheduled = new Map<string, SavedBoard>();
+  for (const item of items) {
+    if (item.kind !== 'board' || Date.parse(item.starts_at) <= now) continue;
+    const old = scheduled.get(item.request_id);
+    if (old) old.classrooms.push(item.classroom_id);
+    else scheduled.set(item.request_id, { id: item.request_id, content: item.content, classrooms: [item.classroom_id], ends_at: item.ends_at,
+      publish_at: item.starts_at, teacher_name: item.teacher_name, updated_at: item.created_at });
+  }
+  return [...[...scheduled.values()].sort((a, b) => a.publish_at!.localeCompare(b.publish_at!)),
+    ...drafts.map(draft => ({ ...draft, publish_at: null })).sort((a, b) => b.updated_at.localeCompare(a.updated_at))];
+}
+export function patchBoardDrafts(drafts: BoardDraftRow[], removal: boolean, row: Pick<BoardDraftRow, 'id'> & Partial<BoardDraftRow>): BoardDraftRow[] {
+  const rest = drafts.filter(draft => draft.id !== row.id);
+  if (removal) return rest;
+  const { id, content, classrooms, ends_at, teacher_name, updated_at } = row as BoardDraftRow;
+  return [...rest, { id, content, classrooms, ends_at, teacher_name, updated_at }];
 }
 export type DisplayRow = DisplayItem & { removed_at?: string | null; created_by?: string };
 export function patchDisplayItems(items: DisplayItem[], removal: boolean, row: Pick<DisplayRow, 'id'> & Partial<DisplayRow>): DisplayItem[] {
@@ -154,8 +181,14 @@ export function localInput(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-export function endOfToday(now: number): string {
-  return localInput(now).slice(0, 10) + 'T23:59';
+export const localDate = (ms: number) => localInput(ms).slice(0, 10);
+export function endOfDay(ms: number): string {
+  return localDate(ms) + 'T23:59';
+}
+// Moves a local "YYYY-MM-DDTHH:mm" by whole calendar days.
+export function shiftDays(value: string, days: number): string {
+  const d = new Date(value); d.setDate(d.getDate() + days);
+  return localInput(d.getTime());
 }
 // "HH:mm" at least 10 minutes ahead, on the 5-minute grid.
 export function soonTime(now: number): string {
@@ -167,12 +200,18 @@ export function todayAt(now: number, time: string): number {
   const d = new Date(now); d.setHours(hours, minutes, 0, 0);
   return d.getTime();
 }
-// An empty endAt means the end of today.
-export function endError(endAt: string, now: number): string {
-  const end = Date.parse(endAt || endOfToday(now));
+// End dates can be picked up to this many days ahead.
+export const END_DAYS = 365;
+// An empty endAt means the end of the day the item starts, which is today unless it is scheduled.
+export function endError(endAt: string, now: number, start = now): string {
+  const end = Date.parse(endAt || endOfDay(start));
   if (Number.isNaN(end) || end <= now) return '结束时间已过';
-  if (end > now + 7 * 86_400_000) return '最多显示 7 天';
+  if (end <= start) return '结束时间需晚于发布时间';
+  if (end > now + (END_DAYS + 1) * 86_400_000) return '最多显示一年';
   return '';
+}
+export function publishError(publishAt: string, now: number): string {
+  return publishAt && Date.parse(publishAt) <= now ? '发布时间已过' : '';
 }
 export const COUNTDOWN_DAYS = 366;
 // Whole calendar days from today to a "YYYY-MM-DD" date.
