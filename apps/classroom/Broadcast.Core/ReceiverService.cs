@@ -33,7 +33,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
                         var state = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, token);
                         clock.Sync(state.ServerNow);
                         if (!state.Active) throw new BindingRevokedException();
-                        if (state.Display is not null) await display.UpdateAsync(state.Display, state.Schedule, token);
+                        if (state.Display is not null) await display.UpdateAsync(state.Display, state.Schedule, state.Birthdays, token);
                         attempt = 0;
                         StatusChanged?.Invoke(state.ClassroomId + " · 在线");
                     }, life.Token);
@@ -98,7 +98,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
             {
                 var state = await backend.RpcAsync<DisplayBatch>("display_state", new { }, ct);
                 clock.Sync(state.ServerNow);
-                await display.UpdateAsync(state.Items, state.Schedule, ct);
+                await display.UpdateAsync(state.Items, state.Schedule, state.Birthdays, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception e) { Report(e); }

@@ -274,6 +274,12 @@ describe('board themes and schedules', () => {
     expect((await screen()).map(i => String(i.content.theme)).toSorted((a, b) => a.localeCompare(b))).toEqual(['festive', 'plain']);
     await expect(show('board', { entries: ['x'], speak: false, voice_type: 101001, theme: 'neon' })).rejects.toThrow('背景');
   });
+  it('keeps the flag-raising choice and defaults it to off', async () => {
+    await clearDisplay(); await show('board', { title: '晨会', entries: ['升旗'], speak: false, voice_type: 101001, flag: true });
+    await show('board', { entries: ['旧页面'], speak: false, voice_type: 101001 });
+    expect((await screen()).map(i => String(i.content.flag)).toSorted((a, b) => a.localeCompare(b))).toEqual(['false', 'true']);
+    await expect(show('board', { entries: ['x'], speak: false, voice_type: 101001, flag: 'yes' })).rejects.toThrow('升旗');
+  });
   const week = [['english', 'math', 'lunch', 'pe'], ['chinese'], [], ['club', 'it'], ['art', 'elective']];
   const save = (classroom: string, days: unknown) => db.query('select set_schedule($1,$2,$3)', [classroom, JSON.stringify(days), '赵老师']);
   it('saves a weekly schedule that only its own class receives', async () => {
@@ -284,6 +290,20 @@ describe('board themes and schedules', () => {
     expect((await scalar<{ schedule: string[][] }>('select display_state()')).schedule).toEqual(week);
     await identity(second); expect((await scalar<{ schedule: string[][] | null }>('select display_state()')).schedule).toBeNull();
     expect(await scalar<number>('select count(*)::int from schedules')).toBe(0);
+  });
+  it('keeps a class birthday list that only its own class receives', async () => {
+    const save = (classroom: string, students: unknown) => db.query('select set_birthdays($1,$2,$3)', [classroom, JSON.stringify(students), '赵老师']);
+    await identity(admin, 'admin'); await save('8-1', [{ name: ' 胡昊凯 Martin ', date: '01-02' }, { name: '闰年', date: '02-29' }]);
+    await identity(third); expect((await scalar<{ birthdays: unknown }>('select device_heartbeat(true)')).birthdays)
+      .toEqual([{ name: '胡昊凯 Martin', date: '01-02' }, { name: '闰年', date: '02-29' }]);
+    await identity(second); expect((await scalar<{ birthdays: unknown }>('select display_state()')).birthdays).toBeNull();
+    expect(await scalar<number>('select count(*)::int from birthdays')).toBe(0);
+    await identity(admin, 'admin');
+    await expect(save('8-1', [{ name: '错', date: '02-30' }])).rejects.toThrow('日期');
+    await expect(save('8-1', [{ name: '错', date: '13-01' }])).rejects.toThrow('日期');
+    await expect(save('8-1', [{ name: '错', date: '2013-01-02' }])).rejects.toThrow('日期');
+    await expect(save('8-1', [{ name: ' ', date: '01-02' }])).rejects.toThrow('姓名');
+    await identity(first); await expect(save('8-3', [])).rejects.toThrow('管理员');
   });
   it('rejects malformed schedules and non-admin writes', async () => {
     await identity(admin, 'admin');

@@ -189,7 +189,7 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .screen-text { flex: 1; min-width: 0; } .screen-summary { display: block; overflow-wrap: anywhere; line-height: 1.6; } .screen-text .muted { display: block; margin-top: 3px; line-height: 1.5; }
 /* Narrow screens only change layout: labels go above their controls, buttons fill the row, and the send button takes the full width. */
 @media(max-width: 600px) {
-  .tabs { gap: 22px; } .tabs button svg { display: none; } .kind-card { font-size: 13px; }
+  .tabs { gap: 16px; } .tabs button svg { display: none; } .birthday-list .entry-number { display: none; } .kind-card { font-size: 13px; }
   .option-field { grid-template-columns: 1fr; gap: 6px; } .option-label { line-height: 1.4; }
   .choice-row:not(.compact) button { flex: 1 1 auto; } .emotion-row button { flex: 1 1 calc(33% - 9px); justify-content: center; padding: 0 10px; }
   .voice-list { grid-template-columns: 1fr; } .theme-row { display: grid; grid-template-columns: repeat(3, 1fr); }
@@ -197,3 +197,6 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
   .receipt-offline { width: 100%; text-align: right; }
 }
 @media(prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
+.birthday-date { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; color: #5f6c80; font-weight: 600; }
+.entry-row .birthday-date input { width: 44px; padding: 0 4px; text-align: center; font-variant-numeric: tabular-nums; }
+.tabs button, .character-count { white-space: nowrap; }

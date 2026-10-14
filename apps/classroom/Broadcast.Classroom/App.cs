@@ -85,7 +85,9 @@ public sealed class App : Application
         var queue = new DeliveryQueue(_backend, alerts, _speech, audio.Primary, outbox, clock, banners);
         var reader = new BoardReader(_speech, audio.Secondary);
         reader.Error += LocalState.Log;
-        var display = new DisplayState(new StateDisplay(clock, alerts), clock, reader);
+        var screen = new StateDisplay(clock, alerts, audio.Primary);
+        screen.Error += LocalState.Log;
+        var display = new DisplayState(screen, clock, reader);
         display.Error += LocalState.Log;
         var receiver = new ReceiverService(_backend, queue, outbox, clock, display);
         receiver.StatusChanged += state => Dispatcher.UIThread.Post(() => { if (_tray is not null) _tray.ToolTipText = "校园广播 · " + state; });

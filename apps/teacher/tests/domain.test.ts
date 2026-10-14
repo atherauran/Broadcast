@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -93,5 +93,14 @@ describe('patching from realtime rows', () => {
     expect(patchDisplayItems([a, c], false, { ...a, removed_at: 'now' } as never).map(x => x.id)).toEqual(['c']);
     expect(patchDisplayItems([a, c], true, { id: 'c' }).map(x => x.id)).toEqual(['a']);
     expect(patchDisplayItems([a], false, { ...a, created_by: 'x', removed_at: null } as never)[0]).not.toHaveProperty('created_by');
+  });
+});
+describe('pasted birthdays', () => {
+  it('reads spreadsheet rows, keeping the first and last name cells', () => {
+    const text = '编号\t中文名\t英文名\t昵称\t出生日期\n1\t胡昊凯\tHu, Hao Kai\tMartin\t2013/1/2\r\n27\t许书杨\tXu, Shu Yang\tSophia\t2012/9/7\n';
+    expect(pastedBirthdays(text)).toEqual([{ name: '胡昊凯 Martin', date: '01-02' }, { name: '许书杨 Sophia', date: '09-07' }]);
+  });
+  it('accepts plain lines and Chinese dates, and skips impossible ones', () => {
+    expect(pastedBirthdays('张三 3月12日\n李四 2-30\n王五 2012-02-29')).toEqual([{ name: '张三', date: '03-12' }, { name: '王五', date: '02-29' }]);
   });
 });

@@ -23,6 +23,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Display items appear and end on the server clock, countdowns linger", DisplaySchedule),
     ("Unchanged display state is not re-applied, removal is", DisplayDiff),
     ("The schedule shows the local weekday's lessons, Monday to Friday", ScheduleDays),
+    ("Birthdays are greeted on the day, and weekend ones on Friday", BirthdayDays),
     ("A board is read once, line by line, only near its start", BoardReadOnce),
     ("A fullscreen broadcast cuts off board reading", PrimaryPreempts),
 };
@@ -256,9 +257,9 @@ static async Task DisplaySchedule()
     var clock = new ServerClock(); var now = DateTimeOffset.UtcNow; var screen = new FakeScreen();
     var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
     var note = Shown("note", now.AddMinutes(10), now.AddMinutes(30)); var countdown = Shown("countdown", now, now.AddMinutes(5));
-    await state.UpdateAsync([note, countdown], null, default);
+    await state.UpdateAsync([note, countdown], null, null, default);
     Check(screen.Last.Select(i => i.Kind).SequenceEqual(new[] { "countdown" }), "Scheduled note shown early");
-    clock.Sync(now.AddMinutes(10)); await state.UpdateAsync([note, countdown], null, default);
+    clock.Sync(now.AddMinutes(10)); await state.UpdateAsync([note, countdown], null, null, default);
     Check(screen.Last.Select(i => i.Kind).SequenceEqual(new[] { "note" }), "Note not shown at its start");
     Check(DisplayState.Visible(countdown, now.AddMinutes(5).AddSeconds(4)) && !DisplayState.Visible(countdown, now.AddMinutes(5).AddSeconds(5)));
     Check(!DisplayState.Visible(note, note.EndsAt));
@@ -268,9 +269,27 @@ static async Task DisplayDiff()
     var clock = new ServerClock(); var now = clock.Now; var screen = new FakeScreen();
     var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
     var note = Shown("note", now.AddMinutes(-1), now.AddMinutes(30));
-    await state.UpdateAsync([note], null, default); await state.UpdateAsync([note with { }], null, default);
+    await state.UpdateAsync([note], null, null, default); await state.UpdateAsync([note with { }], null, null, default);
     Check(screen.Applied.Count == 1, "Same state was applied twice");
-    await state.UpdateAsync([], null, default); Check(screen.Applied.Count == 2 && screen.Last.Count == 0);
+    await state.UpdateAsync([], null, null, default); Check(screen.Applied.Count == 2 && screen.Last.Count == 0);
+}
+static async Task BirthdayDays()
+{
+    Birthday[] list = [new("周四", "10-15"), new("周五", "10-16"), new("周六", "10-17"), new("周日", "10-18"), new("闰日", "02-29")];
+    DateTimeOffset At(int year, int month, int day) => new(new DateTime(year, month, day, 9, 0, 0, DateTimeKind.Local));
+    Check(DisplayState.Celebrations(list, At(2026, 10, 15)).Select(c => c.Name).SequenceEqual(["周四"]), "Thursday");
+    var friday = DisplayState.Celebrations(list, At(2026, 10, 16));
+    Check(friday.Select(c => c.Name).SequenceEqual(["周五", "周六", "周日"]) && friday[1].On == new DateOnly(2026, 10, 17), "Friday must greet the weekend");
+    Check(DisplayState.Celebrations(list, At(2026, 10, 19)).Length == 0, "Monday greets the weekend again");
+    Check(DisplayState.Celebrations(list, At(2027, 2, 28)).Single().Name == "闰日" && DisplayState.Celebrations(list, At(2028, 2, 28)).Length == 0
+        && DisplayState.Celebrations(list, At(2028, 2, 29)).Single().Name == "闰日", "29 February");
+    Check(DisplayState.Celebrations(null, At(2026, 10, 16)).Length == 0, "Missing list");
+    var clock = new ServerClock(); var screen = new FakeScreen();
+    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
+    clock.Sync(At(2026, 10, 15)); await state.UpdateAsync([], null, list, default);
+    Check(screen.Birthdays.Single().Name == "周四", "Birthday not applied");
+    clock.Sync(At(2026, 10, 16)); await state.UpdateAsync([], null, list, default);
+    Check(screen.Applied.Count == 2 && screen.Birthdays.Count == 3, "Birthdays did not move to the next day");
 }
 static async Task ScheduleDays()
 {
@@ -282,12 +301,12 @@ static async Task ScheduleDays()
     Check(DisplayState.Today(null, At(12)) is null, "Missing schedule shown");
     var clock = new ServerClock(); var screen = new FakeScreen();
     var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
-    clock.Sync(At(12)); await state.UpdateAsync([], week, default);
+    clock.Sync(At(12)); await state.UpdateAsync([], week, null, default);
     Check(screen.Today?.Periods.Length == 2, "Schedule not applied");
-    await state.UpdateAsync([], week, default); Check(screen.Applied.Count == 1, "Same schedule applied twice");
-    clock.Sync(At(13)); await state.UpdateAsync([], week, default);
+    await state.UpdateAsync([], week, null, default); Check(screen.Applied.Count == 1, "Same schedule applied twice");
+    clock.Sync(At(13)); await state.UpdateAsync([], week, null, default);
     Check(screen.Applied.Count == 2 && screen.Today?.Periods.Single() == "math", "Schedule did not move to the next day");
-    clock.Sync(At(17)); await state.UpdateAsync([], week, default); Check(screen.Today is null, "Weekend still shows a schedule");
+    clock.Sync(At(17)); await state.UpdateAsync([], week, null, default); Check(screen.Today is null, "Weekend still shows a schedule");
 }
 static async Task BoardReadOnce()
 {
@@ -295,11 +314,11 @@ static async Task BoardReadOnce()
     var state = new DisplayState(new FakeScreen(), clock, new BoardReader(speech, audio));
     var entries = Enumerable.Range(1, 12).Select(i => $"第{i}条：" + new string('字', 95)).ToArray();
     var board = Shown("board", now.AddSeconds(-5), now.AddHours(1), new DisplayContent("本周公告", entries, true, 101011));
-    await state.UpdateAsync([board], null, default); await state.UpdateAsync([board], null, default);
+    await state.UpdateAsync([board], null, null, default); await state.UpdateAsync([board], null, null, default);
     await Until(() => audio.Played == 13);
     Check(speech.Calls == 13 && speech.VoiceTypes.All(v => v == 101011), "Each line should be one short synthesis");
     var old = Shown("board", now.AddMinutes(-5), now.AddHours(1), new DisplayContent("旧公告", ["已经过了朗读时间"], true));
-    await state.UpdateAsync([board, old], null, default); await Task.Delay(30);
+    await state.UpdateAsync([board, old], null, null, default); await Task.Delay(30);
     Check(speech.Calls == 13, "A board seen long after its start was read aloud");
 }
 static async Task PrimaryPreempts()
@@ -360,7 +379,9 @@ sealed class FakeScreen : IStateDisplay
     public readonly ConcurrentQueue<IReadOnlyList<DisplayItem>> Applied = [];
     public IReadOnlyList<DisplayItem> Last => Applied.Last();
     public DaySchedule? Today;
-    public Task ApplyAsync(IReadOnlyList<DisplayItem> visible, DaySchedule? today) { Applied.Enqueue(visible); Today = today; return Task.CompletedTask; }
+    public IReadOnlyList<Celebration> Birthdays = [];
+    public Task ApplyAsync(IReadOnlyList<DisplayItem> visible, DaySchedule? today, IReadOnlyList<Celebration> birthdays)
+    { Applied.Enqueue(visible); Today = today; Birthdays = birthdays; return Task.CompletedTask; }
 }
 sealed class FakeBanners : IBannerDisplay
 {

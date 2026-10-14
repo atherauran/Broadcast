@@ -67,7 +67,8 @@ export const BOARD_THEMES: { id: BoardTheme; label: string }[] = [
   { id: 'plain', label: '简洁' }, { id: 'festive', label: '节日' }, { id: 'joyful', label: '欢快' },
   { id: 'fresh', label: '清新' }, { id: 'tech', label: '科技' }, { id: 'safety', label: '提醒' },
 ];
-export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number; theme?: BoardTheme }
+// flag adds a button that plays the national anthem with the flag in the classroom.
+export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number; theme?: BoardTheme; flag?: boolean }
 export interface NoteContent { text: string; color: NoteColor }
 export interface CountdownContent { label: string; fullscreen: boolean; date?: string }
 export type DisplayItem = {
@@ -260,4 +261,35 @@ export interface Schedule { classroom_id: string; days: Week; teacher_name: stri
 export function patchSchedule(schedules: Schedule[], row: Schedule): Schedule[] {
   const { classroom_id, days, teacher_name, updated_at } = row;
   return [...schedules.filter(item => item.classroom_id !== classroom_id), { classroom_id, days, teacher_name, updated_at }];
+}
+
+// A class's birthdays as "MM-DD" without the year; the classroom greets them on the day, weekend ones on Friday.
+export interface Birthday { name: string; date: string }
+export interface BirthdayList { classroom_id: string; students: Birthday[]; teacher_name: string; updated_at: string }
+export const BIRTHDAY_LIMIT = 80;
+export const monthDays = (month: number) => new Date(2000, month, 0).getDate();
+// "1/2", "1-2", "1.2", "1月2日" or a full date such as "2013/1/2" as "01-02"; empty when it is not a real day.
+function monthDay(text: string): string {
+  const found = /^(?:\d{4}[/.-])?(\d{1,2})[/.\-月](\d{1,2})日?$/.exec(text.trim());
+  if (!found) return '';
+  const [month, day] = [+found[1], +found[2]];
+  return month >= 1 && month <= 12 && day >= 1 && day <= monthDays(month) ? `${pad(month)}-${pad(day)}` : '';
+}
+export function patchBirthdays(lists: BirthdayList[], row: BirthdayList): BirthdayList[] {
+  const { classroom_id, students, teacher_name, updated_at } = row;
+  return [...lists.filter(item => item.classroom_id !== classroom_id), { classroom_id, students, teacher_name, updated_at }];
+}
+// Rows copied from a spreadsheet: one student per line with a date such as 2013/1/2 or 1月2日. Number-only cells (a row number) are dropped,
+// and with several name cells the first and last are kept, so "胡昊凯 | Hu, Hao Kai | Martin" becomes "胡昊凯 Martin". Lines without a date are skipped.
+export function pastedBirthdays(text: string): Birthday[] {
+  return text.split(/\r?\n/).flatMap(line => {
+    const cells = (line.includes('\t') ? line.split('\t') : line.split(/\s+/)).map(cell => cell.trim()).filter(Boolean);
+    let date = '';
+    const names = cells.filter(cell => {
+      if (/^(?:\d{4}[/.-])?\d{1,2}[/.\-月]\d{1,2}日?$/.test(cell)) { date ||= monthDay(cell); return false; }
+      return !/^\d+$/.test(cell);
+    });
+    const name = (names.length > 1 ? `${names[0]} ${names.at(-1)}` : names[0] ?? '').slice(0, 40);
+    return date && name ? [{ name, date }] : [];
+  });
 }

@@ -173,6 +173,8 @@ export function BoardForm({ draft, now, onChange, onError }: {
         {BOARD_THEMES.map(theme => <button type="button" key={theme.id} className={'theme-choice theme-' + theme.id + (draft.theme === theme.id ? ' active' : '')}
           aria-pressed={draft.theme === theme.id} onClick={() => onChange({ theme: theme.id })}><ThemeArt theme={theme.id} /><span>{theme.label}</span></button>)}
       </div></Option>
+      <Choices legend="升国旗" value={draft.flag ? 'on' : 'off'} options={[{ id: 'off', label: '不需要' }, { id: 'on', label: '显示升旗按钮' }]}
+        onChange={value => onChange({ flag: value === 'on' })} />
       <Option label="发布时间"><div className="choice-row">
         <button type="button" className={draft.publishAt ? '' : 'active'} aria-pressed={!draft.publishAt} onClick={() => publishAt('')}>立即</button>
         <button type="button" className={draft.publishAt ? 'active' : ''} aria-pressed={!!draft.publishAt}

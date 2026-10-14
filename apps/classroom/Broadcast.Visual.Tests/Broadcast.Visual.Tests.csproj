@@ -4,11 +4,17 @@
     <PackageReference Include="Avalonia.Headless" Version="11.3.21" />
     <PackageReference Include="Avalonia.Skia" Version="11.3.21" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.21" />
+    <PackageReference Include="NAudio.Core" Version="2.4.0" />
     <ProjectReference Include="../Broadcast.Core/Broadcast.Core.csproj" />
     <Compile Include="../Broadcast.Classroom/BroadcastWindow.cs" Link="BroadcastWindow.cs" />
     <Compile Include="../Broadcast.Classroom/BannerWindow.cs" Link="BannerWindow.cs" />
     <Compile Include="../Broadcast.Classroom/WindowLayer.cs" Link="WindowLayer.cs" />
     <Compile Include="../Broadcast.Classroom/StateWindows.cs" Link="StateWindows.cs" />
     <Compile Include="../Broadcast.Classroom/Backdrop.cs" Link="Backdrop.cs" />
+    <Compile Include="../Broadcast.Classroom/Flag.cs" Link="Flag.cs" />
+    <Compile Include="../Broadcast.Classroom/Birthday.cs" Link="Birthday.cs" />
+    <Compile Include="../Broadcast.Classroom/Playback.cs" Link="Playback.cs" />
+    <AvaloniaResource Include="../Broadcast.Classroom/Assets/anthem.wav" Link="Assets/anthem.wav" />
+    <AvaloniaResource Include="../Broadcast.Classroom/Assets/birthday.wav" Link="Assets/birthday.wav" />
   </ItemGroup>
 </Project>

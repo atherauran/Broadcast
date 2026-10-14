@@ -1,0 +1,2 @@
+det.onnx, rec.onnx and keys.txt are the PP-OCRv4 Chinese detection and recognition models and dictionary from PaddleOCR
+(https://github.com/PaddlePaddle/PaddleOCR), converted to ONNX, licensed under the Apache License 2.0.

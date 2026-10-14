@@ -2,15 +2,17 @@ import { useState } from 'react';
 import { ChevronRight, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CLASSROOM_IDS, DAY_PERIODS, SCHOOL_DAYS, SUBJECTS, clockText, emptyWeek, type Schedule, type Week } from '@/lib/domain';
+import { scheduleFromLines } from '@/lib/import';
+import { PhotoImport } from './photo-import';
 
-const classKey = 'broadcast-schedule-class';
+export const classKey = 'broadcast-schedule-class';
 // Monday to Friday open on their own day; a weekend opens on Monday.
 const thisSchoolDay = () => { const day = new Date().getDay(); return day >= 1 && day <= 5 ? day - 1 : 0; };
 
 // Unsaved weeks live in the parent, so switching class or tab keeps them.
-export function ScheduleEditor({ schedules, drafts, setDrafts, now, ready, busy, onSave }: {
+export function ScheduleEditor({ schedules, drafts, setDrafts, now, ready, busy, onSave, onError }: {
   schedules: Schedule[]; drafts: Record<string, Week>; setDrafts: (update: (old: Record<string, Week>) => Record<string, Week>) => void;
-  now: number; ready: boolean; busy: string; onSave: (classroom: string, days: Week) => Promise<boolean>;
+  now: number; ready: boolean; busy: string; onSave: (classroom: string, days: Week) => Promise<boolean>; onError: (message: string) => void;
 }) {
   const [classroom, setClassroom] = useState(() => localStorage.getItem(classKey) || '');
   const [day, setDay] = useState(thisSchoolDay);
@@ -21,6 +23,12 @@ export function ScheduleEditor({ schedules, drafts, setDrafts, now, ready, busy,
   const periods = week[day];
   const edit = (next: string[]) => setDrafts(old => ({ ...old, [classroom]: week.map((list, at) => at === day ? next : list) }));
   function pick(id: string) { setClassroom(id); localStorage.setItem(classKey, id); }
+  // A photographed week replaces all five days of this class's draft.
+  function imported(lines: Parameters<typeof scheduleFromLines>[0]) {
+    const { week: read, unknown } = scheduleFromLines(lines);
+    setDrafts(old => ({ ...old, [classroom]: read }));
+    if (unknown.length) onError(`这些课没有认出科目，已跳过，请手动补上：${unknown.join('、')}`);
+  }
   async function save() {
     if (await onSave(classroom, week)) setDrafts(old => { const rest = { ...old }; delete rest[classroom]; return rest; });
   }
@@ -53,6 +61,7 @@ export function ScheduleEditor({ schedules, drafts, setDrafts, now, ready, busy,
         <span>{day < SCHOOL_DAYS.length - 1 &&
           <Button type="button" variant="outline" className="action" onClick={() => setDay(day + 1)}>{SCHOOL_DAYS[day + 1]}<ChevronRight size={17} /></Button>}</span>
         <div className="send-actions">
+          <PhotoImport disabled={!!busy} onError={onError} onLines={lines => { try { imported(lines); } catch (e) { onError((e as Error).message); } }} />
           <Button className="action primary" disabled={!ready || !!busy || !dirty} onClick={() => void save()}>
             {busy === 'schedule' ? '保存中…' : `保存 ${classroom} 课程表`}
           </Button>

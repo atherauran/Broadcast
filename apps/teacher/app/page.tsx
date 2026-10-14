@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { ArrowUpRight, AudioLines, CalendarDays, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
+import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, configured, getBoardDrafts, getClassrooms, getHistory, getOverview, getSchedules, once, rpc, supabase } from '@/lib/api';
-import { CLASSROOM_IDS, boardEntries, endOfDay, isOnline, localInput, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getHistory, getOverview, getSchedules, once, rpc, supabase } from '@/lib/api';
+import { CLASSROOM_IDS, boardEntries, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
-  type SavedBoard, type Schedule, type Week } from '@/lib/domain';
+  type BirthdayList, type SavedBoard, type Schedule, type Week } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
 import { blankBoard, initialDrafts, type Drafts, type Patch } from './compose/drafts';
 import { History, Receipts, broadcastMeta, time } from './history';
 import { OnScreen } from './on-screen';
 import { Devices } from './devices';
+import { BirthdayEditor, type BirthdayRow } from './birthdays';
 import { ScheduleEditor } from './schedule';
 
 const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
@@ -38,8 +39,10 @@ export default function App() {
   const [overview, setOverview] = useState<DisplayItem[]>([]);
   const [boardDrafts, setBoardDrafts] = useState<BoardDraftRow[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [birthdays, setBirthdays] = useState<BirthdayList[]>([]);
+  const [birthdayDrafts, setBirthdayDrafts] = useState<Record<string, BirthdayRow[]>>({});
   const [weekDrafts, setWeekDrafts] = useState<Record<string, Week>>({});
-  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'schedule' | 'devices'>('send');
+  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'schedule' | 'birthdays' | 'devices'>('send');
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -109,8 +112,8 @@ export default function App() {
     const load = async () => {
       try {
         await refreshRooms();
-        const [items, weeks, saved] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), refreshOverview()]);
-        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); }
+        const [items, weeks, saved, lists] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), refreshOverview()]);
+        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); setBirthdays(lists); }
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
@@ -128,6 +131,9 @@ export default function App() {
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, payload => {
         if (payload.eventType !== 'DELETE') setSchedules(old => patchSchedule(old, payload.new as Schedule));
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'birthdays' }, payload => {
+        if (payload.eventType !== 'DELETE') setBirthdays(old => patchBirthdays(old, payload.new as BirthdayList));
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, payload => {
         if (payload.eventType === 'DELETE') return;
@@ -169,7 +175,7 @@ export default function App() {
       const { error } = await supabase!.auth.signOut({ scope: 'local' });
       if (error) throw error;
       localStorage.removeItem(teacherKey);
-      setTeacherName(''); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setRooms(emptyRooms);
+      setTeacherName(''); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms);
     });
   }
   async function login() {
@@ -193,7 +199,7 @@ export default function App() {
   const boardContent = () => {
     const b = drafts.board;
     // Boards are never read aloud; the server still expects the reading fields.
-    return { title: b.title.trim(), entries: boardEntries(b.entries), speak: false, voice_type: 101001, theme: b.theme };
+    return { title: b.title.trim(), entries: boardEntries(b.entries), speak: false, voice_type: 101001, theme: b.theme, flag: b.flag };
   };
   // Saving under the same id replaces the earlier draft or schedule; without publishAt it stays a draft.
   async function saveBoard(publishAt: string) {
@@ -208,7 +214,7 @@ export default function App() {
   }
   function openSaved(board: SavedBoard) {
     const { content } = board;
-    patch('board', { title: content.title, entries: content.entries, theme: content.theme ?? 'plain',
+    patch('board', { title: content.title, entries: content.entries, theme: content.theme ?? 'plain', flag: !!content.flag,
       endAt: board.ends_at ? localInput(Date.parse(board.ends_at)) : '', publishAt: board.publish_at ? localInput(Date.parse(board.publish_at)) : '', draftId: board.id });
     setSelected(board.classrooms);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -293,6 +299,7 @@ export default function App() {
         <button className={tab === 'screen' ? 'active' : ''} onClick={() => setTab('screen')}><MonitorPlay size={18} />正在显示</button>
         <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><Clock3 size={18} />广播历史</button>
         <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}><CalendarDays size={18} />课程表</button>
+        <button className={tab === 'birthdays' ? 'active' : ''} onClick={() => setTab('birthdays')}><Cake size={18} />生日</button>
       </nav>
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
       {configured && !known && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
@@ -321,10 +328,15 @@ export default function App() {
       {tab === 'history' && <History history={history} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
         onResend={resend} rooms={rooms} known={known} now={now} configured={configured} />}
-      {tab === 'schedule' && <ScheduleEditor schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy}
+      {tab === 'schedule' && <ScheduleEditor schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
         onSave={(classroom, days) => run('schedule', async () => {
           await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_teacher_name: teacherName });
           setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
+        })} />}
+      {tab === 'birthdays' && <BirthdayEditor lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
+        onError={setError} onSave={(classroom, students) => run('birthdays', async () => {
+          await rpc('set_birthdays', { p_classroom: classroom, p_students: students, p_teacher_name: teacherName });
+          setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
         })} />}
       {tab === 'devices' && <Devices rooms={rooms} ready={ready} busy={busy} onBack={() => setTab('send')}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })} />}

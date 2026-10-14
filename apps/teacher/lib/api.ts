@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import type { BoardDraftRow, Broadcast, Classroom, DisplayItem, Schedule } from './domain';
+import type { BirthdayList, BoardDraftRow, Broadcast, Classroom, DisplayItem, Schedule } from './domain';
 export const configured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const supabase = configured ? createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY) : null;
 export const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'admin@broadcast.local';
@@ -15,6 +15,12 @@ export const getHistory = (before: string | null = null, id: string | null = nul
 export async function getSchedules(): Promise<Schedule[]> {
   if (!supabase) throw new Error('广播服务尚未配置');
   const { data, error } = await supabase.from('schedules').select('classroom_id, days, teacher_name, updated_at');
+  if (error) throw new Error(error.message);
+  return data;
+}
+export async function getBirthdays(): Promise<BirthdayList[]> {
+  if (!supabase) throw new Error('广播服务尚未配置');
+  const { data, error } = await supabase.from('birthdays').select('classroom_id, students, teacher_name, updated_at');
   if (error) throw new Error(error.message);
   return data;
 }

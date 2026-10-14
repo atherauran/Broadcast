@@ -91,7 +91,9 @@ internal abstract class StateWindow : ClassroomWindow
 // Boards flow top to bottom, then into the next column, in whichever column count gives the largest text.
 internal sealed class BoardWindow : StateWindow
 {
-    private const double ColumnGap = 56, MinColumn = 320, MinSize = 14, MaxSize = 40;
+    private const double ColumnGap = 56, MinColumn = 320, MinSize = 14, MaxSize = 40, ActionRow = 56;
+    // The teacher app's morning meeting template gives boards this title; such a board offers the birthday greeting.
+    public const string MorningTitle = "晨会通知";
     private sealed record Look(IBrush Background, string Title, string Body, string Muted);
     private static IBrush Gradient(string from, string to) => new LinearGradientBrush
     {
@@ -109,34 +111,78 @@ internal sealed class BoardWindow : StateWindow
     };
     private readonly Grid _columns = new();
     private readonly Backdrop _backdrop = new();
+    private readonly Border _page;
     // A block is one entry; the board's title rides on its first entry and the footer on its last, so neither is orphaned.
     private readonly List<(StackPanel Panel, bool Starts)> _blocks = [];
     private readonly List<(TextBlock Block, double Scale)> _texts = [];
     private readonly List<TextBlock> _numbers = [];
     internal Grid Boards => _columns;
+    internal Button FlagButton { get; }
+    internal Button BirthdayButton { get; }
     internal string LookName => _backdrop.Look;
     internal int Columns { get; private set; }
     internal double BaseSize { get; private set; }
 
-    public BoardWindow()
+    public BoardWindow(Action? raiseFlag = null, Action? celebrate = null)
     {
         Title = "公告"; FontFamily = Font;
+        _page = new Border { Padding = new Thickness(56, 40), Child = _columns };
         var scroller = new ScrollViewer
         {
-            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-            Content = new Border { Padding = new Thickness(56, 40), Child = _columns },
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = _page,
         };
-        Content = new Panel { Children = { _backdrop, scroller } };
+        BirthdayButton = ActionButton(new TextBlock { Text = "🎂", FontSize = 22, VerticalAlignment = VerticalAlignment.Center }, "生日祝贺", BirthdayArt.Pink, "#FDF2F8", "#FCE7F3");
+        BirthdayButton.Click += (_, _) => celebrate?.Invoke();
+        FlagButton = ActionButton(new FlagIcon { Width = 33, Height = 22, VerticalAlignment = VerticalAlignment.Center }, "升国旗", FlagArt.Red, "#FFF1EE", "#FFE0DA");
+        FlagButton.Click += (_, _) => raiseFlag?.Invoke();
+        var actions = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 14, Children = { BirthdayButton, FlagButton },
+            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, 32, 20),
+        };
+        Content = new Panel { Children = { _backdrop, scroller, actions } };
         SizeChanged += (_, _) => Fit();
     }
 
+    // White with colored text and outline, so a colored icon stands out on every background; it keeps these colors when hovered or pressed.
+    private Button ActionButton(Control icon, string text, Color color, string hover, string pressed)
+    {
+        var name = "action-" + Styles.Count;
+        var button = new Button
+        {
+            IsVisible = false, Padding = new Thickness(18, 10), CornerRadius = new CornerRadius(12),
+            Background = Brushes.White, Foreground = new SolidColorBrush(color), BorderBrush = new SolidColorBrush(color), BorderThickness = new Thickness(2),
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Content = new StackPanel
+            {
+                Orientation = Orientation.Horizontal, Spacing = 10,
+                Children = { icon, new TextBlock { Text = text, FontFamily = Font, FontSize = 22, FontWeight = FontWeight.Bold, VerticalAlignment = VerticalAlignment.Center } },
+            },
+        };
+        button.Classes.Add(name);
+        foreach (var (state, fill) in new[] { (":pointerover", hover), (":pressed", pressed) })
+            Styles.Add(new Style(x => x.OfType<Button>().Class(name).Class(state).Template().OfType<Avalonia.Controls.Presenters.ContentPresenter>().Name("PART_ContentPresenter"))
+            {
+                Setters =
+                {
+                    new Setter(Avalonia.Controls.Presenters.ContentPresenter.BackgroundProperty, new SolidColorBrush(Color.Parse(fill))),
+                    new Setter(Avalonia.Controls.Presenters.ContentPresenter.BorderBrushProperty, new SolidColorBrush(color)),
+                    new Setter(Avalonia.Controls.Presenters.ContentPresenter.ForegroundProperty, new SolidColorBrush(color)),
+                },
+            });
+        return button;
+    }
+
     // Boards share one window, so it takes the background of the newest one (boards arrive newest first).
-    public void Present(IReadOnlyList<DisplayItem> boards)
+    public void Present(IReadOnlyList<DisplayItem> boards, IReadOnlyList<Celebration> birthdays)
     {
         _blocks.Clear(); _texts.Clear(); _numbers.Clear();
         var name = boards.FirstOrDefault()?.Content.Theme is { } id && Looks.ContainsKey(id) ? id : "plain";
         var look = Looks[name];
         Background = look.Background; _backdrop.Look = name;
+        FlagButton.IsVisible = boards.Any(b => b.Content.Flag);
+        BirthdayButton.IsVisible = birthdays.Count > 0 && boards.Any(b => b.Content.Title == MorningTitle);
+        _page.Padding = new Thickness(56, 40, 56, 40 + (HasActions ? ActionRow : 0));
         foreach (var board in boards)
         {
             var entries = board.Content.Entries ?? [];
@@ -164,7 +210,7 @@ internal sealed class BoardWindow : StateWindow
     private void Fit()
     {
         var width = Math.Max(100, ClientSize.Width - 112 - 20);
-        var height = Math.Max(100, ClientSize.Height - 80);
+        var height = Math.Max(100, ClientSize.Height - 80 - (HasActions ? ActionRow : 0));
         var most = Math.Clamp((int)((width + ColumnGap) / (MinColumn + ColumnGap)), 1, 4);
         (int Columns, double Size) best = (1, 0);
         for (var count = 1; count <= Math.Min(most, _blocks.Count); count++)
@@ -185,6 +231,8 @@ internal sealed class BoardWindow : StateWindow
         if (best.Size == 0) best = (1, MinSize);
         Arrange(best.Columns, ColumnWidth(width, best.Columns), best.Size, capacity);
     }
+
+    private bool HasActions => FlagButton.IsVisible || BirthdayButton.IsVisible;
 
     private static double ColumnWidth(double width, int count) => (width - ColumnGap * (count - 1)) / count;
 
@@ -311,10 +359,11 @@ internal sealed class NotesWindow : StateWindow
         PlaceRight(ContentSize().Width);
     }
 
-    // Oldest first, so a new note joins the end instead of pushing the others around.
-    public void Present(IReadOnlyList<DisplayItem> notes)
+    // Oldest first, so a new note joins the end instead of pushing the others around; the day's birthdays lead the column.
+    public void Present(IReadOnlyList<DisplayItem> notes, IReadOnlyList<Celebration> birthdays, DateOnly today)
     {
         _cards.Children.Clear();
+        if (birthdays.Count > 0) _cards.Children.Add(BirthdayArt.Card(birthdays, today));
         foreach (var note in notes)
         {
             var author = Text("— " + note.TeacherName, 14, "#4B5563");
@@ -517,7 +566,7 @@ internal sealed class CountdownWindow : StateWindow
 }
 
 // Two columns at the right: the day counts over the timetable at the edge, and the timer over the notes beside them.
-internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) : IStateDisplay
+internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts, IAudioPlayer audio) : IStateDisplay
 {
     public const double Gap = 12;
     private BoardWindow? _board;
@@ -525,23 +574,28 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) :
     private DayCountWindow? _days;
     private ScheduleWindow? _schedule;
     private CountdownWindow? _countdown;
+    private PlaybackWindow? _show;
+    private IReadOnlyList<Celebration> _birthdays = [];
     private DisplayItem? _timer;
     private Guid _shrunk;
+    public event Action<Exception>? Error;
     internal IEnumerable<Window> Open => new Window?[] { _board, _notes, _schedule, _days, _countdown }.OfType<Window>();
 
     // Topmost windows go first, so each column below can be placed under them before it shows.
-    public async Task ApplyAsync(IReadOnlyList<DisplayItem> visible, DaySchedule? today) => await Dispatcher.UIThread.InvokeAsync(() =>
+    public async Task ApplyAsync(IReadOnlyList<DisplayItem> visible, DaySchedule? today, IReadOnlyList<Celebration> birthdays) => await Dispatcher.UIThread.InvokeAsync(() =>
     {
+        _birthdays = birthdays;
+        var date = DateOnly.FromDateTime(clock.Now.LocalDateTime);
         var boards = visible.Where(i => i.Kind == "board").OrderByDescending(i => i.StartsAt).ToArray();
         var notes = visible.Where(i => i.Kind == "note").OrderBy(i => i.StartsAt).ToArray();
         var countdowns = visible.Where(i => i.Kind == "countdown").ToArray();
         var days = countdowns.Where(i => i.Content.Date is not null).OrderBy(i => i.EndsAt).ToArray();
         _timer = countdowns.Where(i => i.Content.Date is null).MaxBy(i => i.StartsAt);
-        Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards), WindowLayer.ShowBehindLesson);
+        Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards, birthdays), WindowLayer.ShowBehindLesson);
         Sync(ref _days, days.Length > 0, () => new DayCountWindow(clock), w => w.Present(days), WindowLayer.ShowBehindLesson);
         Sync(ref _schedule, today is not null, () => new ScheduleWindow(), w => w.Present(today!), WindowLayer.ShowBehindLesson);
         ShowCountdown();
-        Sync(ref _notes, notes.Length > 0, () => new NotesWindow(), w => w.Present(notes), WindowLayer.ShowBehindLesson);
+        Sync(ref _notes, notes.Length > 0 || birthdays.Count > 0, () => new NotesWindow(), w => w.Present(notes, birthdays, date), WindowLayer.ShowBehindLesson);
         Stack();
     });
 
@@ -573,9 +627,22 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts) :
         _notes?.Place(top: corner is null ? 0 : corner.ContentSize().Height + Gap, inner);
     }
 
-    private static BoardWindow NewBoard()
+    private void RaiseFlag() => Play("anthem.wav", new FlagScene());
+    private void Celebrate() => Play("birthday.wav", new BirthdayScene(_birthdays, DateOnly.FromDateTime(clock.Now.LocalDateTime)));
+
+    // A show outlives the board that started it, and a press while one runs only brings it forward.
+    private void Play(string sound, Scene scene)
     {
-        var window = new BoardWindow { WindowStartupLocation = WindowStartupLocation.CenterScreen };
+        if (_show is not null) { _show.Activate(); return; }
+        _show = new PlaybackWindow(audio, sound, scene);
+        _show.Error += e => Error?.Invoke(e);
+        _show.Closed += (_, _) => _show = null;
+        _show.Show(); _show.Activate();
+    }
+
+    private BoardWindow NewBoard()
+    {
+        var window = new BoardWindow(RaiseFlag, Celebrate) { WindowStartupLocation = WindowStartupLocation.CenterScreen };
         if (window.Screens.Primary is { } screen)
         {
             window.Width = screen.WorkingArea.Width * .8 / screen.Scaling;

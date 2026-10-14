@@ -12,7 +12,7 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly HashSet<Guid> _read = [];
-    private Desired _desired = new([], null);
+    private Desired _desired = new([], null, null);
     private string _shown = "";
     public event Action<Exception>? Error;
 
@@ -27,9 +27,20 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
         return week is not null && day >= 0 && day < week.Length && week[day] is { Length: > 0 } periods ? new(date, periods) : null;
     }
 
-    public async Task UpdateAsync(DisplayItem[] items, string[][]? week, CancellationToken ct)
+    // Birthdays on the PC's local date; Friday also greets Saturday's and Sunday's. In other years a 29 February birthday falls on the 28th.
+    public static Celebration[] Celebrations(Birthday[]? birthdays, DateTimeOffset now)
     {
-        Volatile.Write(ref _desired, new(items, week));
+        var today = DateOnly.FromDateTime(now.LocalDateTime);
+        var days = today.DayOfWeek == DayOfWeek.Friday ? new[] { today, today.AddDays(1), today.AddDays(2) } : [today];
+        return days.SelectMany(day => (birthdays ?? []).Where(b => Falls(b.Date, day)).Select(b => new Celebration(b.Name, day))).ToArray();
+
+        static bool Falls(string date, DateOnly day) => date == day.ToString("MM-dd")
+            || (date == "02-29" && !DateTime.IsLeapYear(day.Year) && day is { Month: 2, Day: 28 });
+    }
+
+    public async Task UpdateAsync(DisplayItem[] items, string[][]? week, Birthday[]? birthdays, CancellationToken ct)
+    {
+        Volatile.Write(ref _desired, new(items, week, birthdays));
         await TickAsync(ct);
     }
 
@@ -47,7 +58,7 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
         finally
         {
             reader.Retain([]);
-            await display.ApplyAsync([], null);
+            await display.ApplyAsync([], null, []);
         }
     }
 
@@ -60,8 +71,9 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
             var desired = Volatile.Read(ref _desired);
             var visible = desired.Items.Where(item => Visible(item, now)).ToArray();
             var today = Today(desired.Week, now);
-            var signature = JsonSerializer.Serialize(new { visible, today }, Json.Options);
-            if (signature != _shown) { await display.ApplyAsync(visible, today); _shown = signature; }
+            var birthdays = Celebrations(desired.Birthdays, now);
+            var signature = JsonSerializer.Serialize(new { visible, today, birthdays }, Json.Options);
+            if (signature != _shown) { await display.ApplyAsync(visible, today, birthdays); _shown = signature; }
             reader.Retain(visible.Select(item => item.Id));
             foreach (var board in visible.Where(item => item.Kind == "board" && item.Content.Speak && now - item.StartsAt < ReadWindow))
                 if (_read.Add(board.Id)) reader.Start(board, ct);
@@ -69,5 +81,5 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
         finally { _gate.Release(); }
     }
 
-    private sealed record Desired(DisplayItem[] Items, string[][]? Week);
+    private sealed record Desired(DisplayItem[] Items, string[][]? Week, Birthday[]? Birthdays);
 }

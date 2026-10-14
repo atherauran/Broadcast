@@ -19,7 +19,7 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `classroom_status` | none | `{server_now, classrooms}`; admin |
 | `bind_device` | `p_device`, `p_classroom`, `p_name` | empty; admin or server |
 | `unbind_device` | `p_classroom` | empty; admin |
-| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule}`; current device. `display` and `schedule` are the same as in `display_state` |
+| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule, birthdays}`; current device. `display`, `schedule` and `birthdays` are the same as in `display_state` |
 | `pending_broadcasts` | none | `{server_now, items}`; only this device's current class, not started and not expired |
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
 | `ack_delivery` | `p_delivery`, `p_event`, `p_at`, nullable `p_error` | empty; this device's receipt, safe to retry |
@@ -31,8 +31,9 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `save_board_draft` | `p_id`, `p_content`, `p_classrooms`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_publish_at` | empty; admin. Saves a board draft, or schedules it when `p_publish_at` is set (see Board drafts) |
 | `delete_board_draft` | `p_id` | empty; admin. Deletes a draft or a scheduled board that has not appeared yet |
 | `display_overview` | none | `{server_now, items}`: every live or scheduled item in all classes; admin |
-| `display_state` | none | `{server_now, items, schedule}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, and its class's week (see Schedules) or null |
+| `display_state` | none | `{server_now, items, schedule, birthdays}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, its class's week (see Schedules) or null, and its class's birthday list or null |
 | `set_schedule` | `p_classroom`, `p_days`, `p_teacher_name` | empty; admin. Replaces the class's week |
+| `set_birthdays` | `p_classroom`, `p_students`, `p_teacher_name` | empty; admin. Replaces the class's birthday list (see Birthdays) |
 
 `create_broadcast` is an admin RPC called by the teacher app with `p_id`, `p_body`, `p_classrooms`, `p_source`, `p_teacher_name`, `p_repeat_count` (0–4), `p_auto_close`, `p_emotion`, `p_voice_type`, `p_style` and `p_banner_position`. It validates every field, is idempotent per `p_id`, and writes the broadcast and all class deliveries in one transaction.
 
@@ -47,7 +48,7 @@ Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`,
 `display_items` holds one row per class for each board, note or countdown: `request_id`, `classroom_id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, `created_by`, `created_at` and nullable `removed_at`. Devices may select only their current class's rows (removed rows included, so Realtime delivers removals). Every write goes through the admin RPCs above.
 
 `content` by kind:
-- board: `{title, entries, speak, voice_type, theme}`, with title at most 30 characters (default 公告), 1–12 entries of at most 300 characters each, and theme `plain` (default), `festive`, `joyful`, `fresh`, `tech` or `safety`. All boards share one window, which uses the newest board's theme. The teacher app always sends `speak: false`, so boards are not read aloud.
+- board: `{title, entries, speak, voice_type, theme, flag}`, with title at most 30 characters (default 公告), 1–12 entries of at most 300 characters each, theme `plain` (default), `festive`, `joyful`, `fresh`, `tech` or `safety`, and optional boolean `flag` (default false). All boards share one window, which uses the newest board's theme and shows the flag-raising button when any of them has `flag`. The teacher app always sends `speak: false`, so boards are not read aloud.
 - note: `{text, color}`, with text 1–60 characters and color `yellow`, `blue`, `green` or `pink`.
 - countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false. A day count adds `date` (`YYYY-MM-DD`, `fullscreen` must be false): the device shows the calendar days left on its local date, "今天" on the day itself.
 
@@ -63,9 +64,13 @@ Every item starts when it is created (`starts_at` is the server time), except a 
 
 `schedules` holds one row per class: `classroom_id`, `days`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, from `english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
 
+### Birthdays
+
+`birthdays` holds one row per class: `classroom_id`, `students`, `teacher_name`, `updated_by` and `updated_at`. `students` is an array of up to 80 `{name, date}`, name 1–40 characters and date `MM-DD` (02-29 allowed); no birth year is stored. Admins read every row and devices only their class's; writes go through `set_birthdays`. On the PC's local date the device greets that day's birthdays, and on Friday also Saturday's and Sunday's; a 02-29 birthday falls on 02-28 in other years. It shows them as a card at the top of the notes column, and a board titled 晨会通知 (the teacher app's morning meeting template) gets a button that plays a fullscreen greeting.
+
 ## Realtime and presence
 
-The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`, `board_drafts` and `schedules`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items` and `schedules` changes without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
+The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`, `board_drafts`, `schedules` and `birthdays`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items`, `schedules` and `birthdays` changes without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
 
 After the subscription succeeds, the classroom starts reporting heartbeats: every 20 seconds it sends a Phoenix keepalive over the WebSocket and waits for the ack (Supabase requires one at least every 25 seconds; it does no database work). Every 120 seconds it also reports the device heartbeat, whose response carries the display state, and the server marks a classroom offline after 270 seconds without a valid heartbeat. Reconnects back off to about 10 seconds and, once restored, query for unexpired messages. Every 40 seconds a healthy connection also re-queries valid deliveries, so a single lost notification is not missed.
 
@@ -75,4 +80,4 @@ Receipts and online status are shown separately. The 30-second validity limits o
 
 ## Rollout order
 
-Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items. The schedules migration must be applied before the new classroom app ships, because its Realtime join includes the `schedules` table; older classroom apps ignore schedules and board themes.
+Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items. The schedules migration must be applied before the new classroom app ships, because its Realtime join includes the `schedules` table; older classroom apps ignore schedules, board themes, the flag button and birthdays. The birthdays migration must likewise be applied before the new classroom app ships, because its Realtime join includes the `birthdays` table.

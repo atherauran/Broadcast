@@ -80,7 +80,7 @@ foreach (var (name, count, entries, width, height) in new[]
 })
 {
     var board = new BoardWindow { Width = width, Height = height };
-    board.Present(Enumerable.Range(1, count).Select(i => Item("board", new DisplayContent($"今日公告{i}", entries, true))).ToArray()); board.Show(); Dispatcher.UIThread.RunJobs();
+    board.Present(Enumerable.Range(1, count).Select(i => Item("board", new DisplayContent($"今日公告{i}", entries, true))).ToArray(), []); board.Show(); Dispatcher.UIThread.RunJobs();
     if (board.Topmost || !board.ShowInTaskbar || board.Title != "公告") throw new Exception(name + ": board must be a normal window");
     // Only content too long for the window at the smallest size may scroll.
     if (board.Boards.Bounds.Height > board.ClientSize.Height - 80 + 1 && board.BaseSize > 14.5) throw new Exception(name + ": board overflows its window");
@@ -96,13 +96,70 @@ foreach (var theme in new[] { "plain", "festive", "joyful", "fresh", "tech", "sa
 {
     var board = new BoardWindow { Width = 1280, Height = 720 };
     board.Present([Item("board", new DisplayContent("国庆放假通知", ["10月1日至7日放假，8日正常上课", "假期外出注意安全，不到河边玩水"], Theme: theme)),
-        Item("board", new DisplayContent("旧公告", ["较早的公告沿用最新公告的背景"], Theme: "plain"))]);
+        Item("board", new DisplayContent("旧公告", ["较早的公告沿用最新公告的背景"], Theme: "plain"))], []);
     board.Show(); Dispatcher.UIThread.RunJobs();
     if ((theme == "plain") != (board.Background == Brushes.White) || board.LookName != theme) throw new Exception("board-" + theme + ": background does not follow the newest board");
     using var frame = board.CaptureRenderedFrame(); frame?.Save(Path.Combine(output, "board-" + theme + ".png"));
     board.Dismiss();
 }
 Console.WriteLine("PASS board themes: the newest board sets the background");
+
+var (raised, celebrated) = (0, 0);
+var today = DateOnly.FromDateTime(DateTime.Now);
+Celebration[] birthdays = [new("胡昊凯 Martin", today), new("许书杨 Sophia", today.AddDays(1))];
+var flagBoard = new BoardWindow(() => raised++, () => celebrated++) { Width = 1280, Height = 720 };
+var morning = Item("board", new DisplayContent("晨会通知", Enumerable.Range(1, 6).Select(i => $"第{i}条：请同学们按时完成作业并带齐学习用品").ToArray(), Flag: true));
+flagBoard.Present([morning], []);
+flagBoard.Show(); Dispatcher.UIThread.RunJobs();
+if (flagBoard.BirthdayButton.IsVisible) throw new Exception("board-flag: no birthday, no birthday button");
+var textBottom = flagBoard.Boards.TranslatePoint(new Point(0, flagBoard.Boards.Bounds.Height), flagBoard)!.Value.Y;
+if (!flagBoard.FlagButton.IsVisible || flagBoard.FlagButton.TranslatePoint(default, flagBoard)!.Value.Y < textBottom + 12)
+    throw new Exception("board-flag: the flag button must show below the text");
+flagBoard.FlagButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+if (raised != 1) throw new Exception("board-flag: the flag button does nothing");
+flagBoard.Present([morning], birthdays); Dispatcher.UIThread.RunJobs();
+if (!flagBoard.BirthdayButton.IsVisible || !flagBoard.FlagButton.IsVisible) throw new Exception("board-flag: a morning board with a birthday shows both buttons");
+flagBoard.BirthdayButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+if (celebrated != 1) throw new Exception("board-flag: the birthday button does nothing");
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+using (var frame = flagBoard.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "board-flag.png"));
+flagBoard.Present([Item("board", new DisplayContent("国庆升旗", ["请同学们起立"], Theme: "festive", Flag: true))], birthdays);
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+using (var frame = flagBoard.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "board-flag-festive.png"));
+if (flagBoard.BirthdayButton.IsVisible) throw new Exception("board-flag: only the morning meeting board offers the birthday greeting");
+flagBoard.Present([Item("board", new DisplayContent("通知", ["没有升旗"]))], []); Dispatcher.UIThread.RunJobs();
+if (flagBoard.FlagButton.IsVisible) throw new Exception("board-flag: boards without the flag must hide the button");
+flagBoard.Dismiss();
+Console.WriteLine("PASS board-flag: button below the text raises the flag");
+
+var anthem = new SilentAudio();
+var flag = new PlaybackWindow(anthem, "anthem.wav", new FlagScene()) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
+flag.Show(); Dispatcher.UIThread.RunJobs();
+if (!flag.Topmost || flag.ShowInTaskbar || anthem.Played < 1_000_000) throw new Exception("flag: must be topmost and play the anthem");
+foreach (var (step, progress) in new[] { ("start", 0.0), ("half", .5), ("top", 1.0) })
+{
+    flag.Scene.Progress = progress; flag.Scene.Seconds = progress * 40; flag.Scene.InvalidateVisual();
+    AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+    using var frame = flag.CaptureRenderedFrame(); frame?.Save(Path.Combine(output, "flag-" + step + ".png"));
+}
+flag.CloseButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+for (var i = 0; i < 20 && flag.IsVisible; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
+if (flag.IsVisible || !anthem.Stopped) throw new Exception("flag: closing must stop the anthem and the window");
+Console.WriteLine("PASS flag: anthem plays and the close button stops it");
+
+var song = new SilentAudio();
+var party = new PlaybackWindow(song, "birthday.wav", new BirthdayScene(birthdays, today)) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
+party.Show(); Dispatcher.UIThread.RunJobs();
+if (song.Played < 100_000) throw new Exception("birthday: the song must play");
+party.Scene.Seconds = 3; party.Scene.Advance();
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+using (var frame = party.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "birthday.png"));
+party.CloseButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+for (var i = 0; i < 20 && party.IsVisible; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
+if (party.IsVisible) throw new Exception("birthday: closing must close the window");
+if (BirthdayArt.Label(birthdays[1], today) != (today.AddDays(1).DayOfWeek == DayOfWeek.Saturday ? "许书杨 Sophia（周六）" : "许书杨 Sophia（周日）"))
+    throw new Exception("birthday: a weekend birthday must name its day");
+Console.WriteLine("PASS birthday: the song plays with the greeting and the close button works");
 
 var clock = new ServerClock();
 var countdown = new CountdownWindow(clock);
@@ -127,7 +184,7 @@ DisplayItem Day(string label, int ahead) => Item("countdown", new DisplayContent
 var noteItems = new[] { "yellow", "blue", "green", "pink" }.Select((color, i) =>
     Item("note", new DisplayContent(Text: i == 3 ? string.Concat(Enumerable.Repeat("记得带体育服和水杯，", 6)) : $"第{i + 1}张便签", Color: color))).ToArray();
 var notesWindow = new NotesWindow();
-notesWindow.Present(noteItems);
+notesWindow.Present(noteItems, [], today);
 notesWindow.Show(); Dispatcher.UIThread.RunJobs();
 if (notesWindow.Topmost || notesWindow.ShowInTaskbar || notesWindow.Cards.Children.Count != 4) throw new Exception("notes: must be four non-topmost cards");
 using (var frame = notesWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "notes.png"));
@@ -140,6 +197,10 @@ if (columns.Length < 2 || notesWindow.Cards.Children.Any(card => card.Bounds.Bot
     throw new Exception("notes: overflowing cards must move into a new column");
 using (var frame = notesWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "notes-columns.png"));
 Console.WriteLine($"PASS notes: {columns.Length} columns within 300px");
+notesWindow.Present(noteItems[..2], birthdays, today); notesWindow.Cards.MaxHeight = 1000;
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+if (notesWindow.Cards.Children.Count != 3) throw new Exception("notes: the birthday card must lead the notes");
+using (var frame = notesWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "notes-birthday.png"));
 notesWindow.Dismiss();
 
 var dayWindow = new DayCountWindow(clock);
@@ -183,13 +244,13 @@ full.Dismiss();
 
 // The whole screen through StateDisplay: every window must land in its column, under the topmost ones, and stay on screen.
 var (area, scale) = (screen.WorkingArea, screen.Scaling);
-var stateDisplay = new StateDisplay(clock, new BroadcastDisplay());
+var stateDisplay = new StateDisplay(clock, new BroadcastDisplay(), new SilentAudio());
 var week = new DaySchedule(monday, ["english", "math", "physics", "chemistry", "lunch", "morality", "art", "pe"]);
 var timer = Item("countdown", new DisplayContent(Label: "距离下课")) with { EndsAt = clock.Now.AddMinutes(20) };
 var festive = Item("board", new DisplayContent("国庆放假通知", ["10月1日至7日放假，8日正常上课", "假期外出注意安全"], Theme: "festive"));
 void Apply(string step, DaySchedule? today, params DisplayItem[] items)
 {
-    var task = stateDisplay.ApplyAsync(items, today);
+    var task = stateDisplay.ApplyAsync(items, today, []);
     Dispatcher.UIThread.RunJobs();
     if (!task.IsCompletedSuccessfully) throw new Exception(step + ": apply did not finish");
     var windows = stateDisplay.Open.Where(w => w is not BoardWindow).ToArray();
@@ -224,5 +285,21 @@ if (stateDisplay.Open.OfType<NotesWindow>().Single().Cards.Children.Select(card 
     throw new Exception("twelve-notes: notes should spread over several columns");
 Apply("weekend", null, [Day("距离期末", 23), timer]);
 Apply("empty", null);
+var birthdayOnly = stateDisplay.ApplyAsync([], null, birthdays); Dispatcher.UIThread.RunJobs();
+if (!birthdayOnly.IsCompletedSuccessfully || stateDisplay.Open.OfType<NotesWindow>().SingleOrDefault()?.Cards.Children.Count != 1)
+    throw new Exception("birthday-only: the birthday card must show without notes");
+Apply("empty-again", null);
 if (stateDisplay.Open.Any()) throw new Exception("empty: windows left open");
 Console.WriteLine("PASS layout: columns, stacking and on-screen bounds across updates");
+
+// Stands in for the speakers: holds the sound until it is stopped, and never reports it started, so a test sets the flag height itself.
+sealed class SilentAudio : IAudioPlayer
+{
+    public int Played { get; private set; }
+    public bool Stopped { get; private set; }
+    public async Task PlayAsync(byte[] audio, Action started, CancellationToken ct)
+    {
+        Played = audio.Length;
+        try { await Task.Delay(Timeout.Infinite, ct); } finally { Stopped = true; }
+    }
+}
