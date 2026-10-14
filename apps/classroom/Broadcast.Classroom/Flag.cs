@@ -11,6 +11,15 @@ internal static class FlagArt
     public static readonly Color Red = Color.Parse("#DE2910"), Yellow = Color.Parse("#FFDE00");
     private static readonly (double X, double Y, double R)[] Stars = [(5, 5, 3), (10, 2, 1), (12, 4, 1), (12, 7, 1), (10, 9, 1)];
 
+    // The flag as a picture of the given pixel size, drawn in pixels at 96 dpi so the screen's scaling never enters into it.
+    public static RenderTargetBitmap Bitmap(PixelSize size)
+    {
+        var bitmap = new RenderTargetBitmap(size, new Vector(96, 96));
+        using var context = bitmap.CreateDrawingContext();
+        Draw(context, new Rect(0, 0, size.Width, size.Height));
+        return bitmap;
+    }
+
     public static void Draw(DrawingContext context, Rect area)
     {
         context.FillRectangle(new SolidColorBrush(Red), area);
@@ -59,13 +68,10 @@ internal sealed class FlagScene : Scene
         var fw = Math.Min(w * .94, h * .9 * 1.5);
         var fh = fw * 2 / 3;
         var (left, top) = ((w - fw) / 2, (h - fh) / 2);
+        // Sharp at the screen's scaling; strips are cut from it in its own pixels.
         var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
-        if (_flag is null)
-        {
-            _flag = new RenderTargetBitmap(new PixelSize((int)Math.Ceiling(fw * scale), (int)Math.Ceiling(fh * scale)), new Vector(96 * scale, 96 * scale));
-            using var art = _flag.CreateDrawingContext();
-            FlagArt.Draw(art, new Rect(_flag.Size));
-        }
+        _flag ??= FlagArt.Bitmap(new PixelSize((int)Math.Ceiling(fw * scale), (int)Math.Ceiling(fh * scale)));
+        var pixels = _flag.PixelSize.Width / fw;
         // Vertical strips ride a travelling wave that grows away from the hoist, and are shaded by their slope.
         const double strip = 4;
         var count = (int)Math.Ceiling(fw / strip);
@@ -76,7 +82,7 @@ internal sealed class FlagScene : Scene
             var x = i * strip;
             var width = Math.Min(strip, fw - x);
             var dest = new Rect(left + x, top + fh * .04 * u * Math.Sin(phase), width + .6, fh);
-            context.DrawImage(_flag, new Rect(x, 0, width, fh), dest);
+            context.DrawImage(_flag, new Rect(x * pixels, 0, width * pixels, _flag.PixelSize.Height), dest);
             var slope = Math.Cos(phase) * (.3 + .7 * u);
             context.FillRectangle(new SolidColorBrush(slope > 0 ? Colors.White : Colors.Black, Math.Abs(slope) * .16), dest);
         }

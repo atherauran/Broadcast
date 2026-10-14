@@ -142,10 +142,41 @@ foreach (var seconds in new[] { 0, 1 })
     AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
     using var frame = flag.CaptureRenderedFrame(); frame?.Save(Path.Combine(output, $"flag-{seconds}.png"));
 }
-flag.CloseButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+flag.MouseDown(new Point(400, 300), Avalonia.Input.MouseButton.Left);
 for (var i = 0; i < 20 && flag.IsVisible; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
-if (flag.IsVisible || !anthem.Stopped) throw new Exception("flag: closing must stop the anthem and the window");
-Console.WriteLine("PASS flag: anthem plays and the close button stops it");
+if (flag.IsVisible || !anthem.Stopped) throw new Exception("flag: a tap must stop the anthem and close the window");
+
+// The stars sit on the flag's 30 × 20 grid at any pixel size, and land in place when the screen is scaled.
+(byte R, byte G, byte B) Pixel(Avalonia.Media.Imaging.Bitmap bitmap, int x, int y)
+{
+    var buffer = new byte[4];
+    var pin = System.Runtime.InteropServices.GCHandle.Alloc(buffer, System.Runtime.InteropServices.GCHandleType.Pinned);
+    try { bitmap.CopyPixels(new PixelRect(x, y, 1, 1), pin.AddrOfPinnedObject(), 4, 4); } finally { pin.Free(); }
+    return bitmap.Format == Avalonia.Platform.PixelFormat.Rgba8888 ? (buffer[0], buffer[1], buffer[2]) : (buffer[2], buffer[1], buffer[0]);
+}
+bool Yellow((byte R, byte G, byte B) p) => p.R > 200 && p.G > 170 && p.B < 90;
+bool Red((byte R, byte G, byte B) p) => p.R > 150 && p.G < 80 && p.B < 80;
+foreach (var width in new[] { 300, 450, 600 })
+{
+    using var art = FlagArt.Bitmap(new PixelSize(width, width * 2 / 3));
+    int At(double units) => (int)(units * width / 30);
+    if (!Yellow(Pixel(art, At(5), At(5))) || !Yellow(Pixel(art, At(10), At(2))) || !Yellow(Pixel(art, At(12), At(7)))
+        || !Red(Pixel(art, At(5), At(1.5) - 2)) || !Red(Pixel(art, At(20), At(10))) || !Red(Pixel(art, At(8), At(10))))
+        throw new Exception($"flag: stars misplaced at {width}px");
+}
+var scaled = new FlagScene();
+scaled.Measure(new Size(600, 400)); scaled.Arrange(new Rect(0, 0, 600, 400));
+using (var frame = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize(1200, 800), new Vector(192, 192)))
+{
+    frame.Render(scaled);
+    // The flag is 540 × 360 at (30, 20); positions double in a 200% frame.
+    int X(double units) => (int)((30 + units * 18) * 2);
+    int Y(double units) => (int)((20 + units * 18) * 2);
+    if (!Yellow(Pixel(frame, X(5), Y(5))) || !Yellow(Pixel(frame, X(10), Y(2) + 2)) || !Red(Pixel(frame, X(20), Y(10))) || !Red(Pixel(frame, X(8), Y(10))))
+        throw new Exception("flag: stars misplaced on a 200% screen");
+    frame.Save(Path.Combine(output, "flag-200.png"));
+}
+Console.WriteLine("PASS flag: anthem plays, a tap ends it, stars in place at any scaling");
 
 var song = new SilentAudio();
 var party = new PlaybackWindow(song, "birthday.wav", new BirthdayScene(birthdays, today)) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
@@ -154,12 +185,12 @@ if (song.Played < 100_000) throw new Exception("birthday: the song must play");
 party.Scene.Seconds = 3; party.Scene.Advance();
 AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
 using (var frame = party.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "birthday.png"));
-party.CloseButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+party.KeyPress(Avalonia.Input.Key.Escape, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Escape, null);
 for (var i = 0; i < 20 && party.IsVisible; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
-if (party.IsVisible) throw new Exception("birthday: closing must close the window");
+if (party.IsVisible) throw new Exception("birthday: Esc must close the window");
 if (BirthdayArt.Label(birthdays[1], today) != (today.AddDays(1).DayOfWeek == DayOfWeek.Saturday ? "许书杨 Sophia（周六）" : "许书杨 Sophia（周日）"))
     throw new Exception("birthday: a weekend birthday must name its day");
-Console.WriteLine("PASS birthday: the song plays with the greeting and the close button works");
+Console.WriteLine("PASS birthday: the song plays with the greeting and Esc ends it");
 
 var clock = new ServerClock();
 var countdown = new CountdownWindow(clock);

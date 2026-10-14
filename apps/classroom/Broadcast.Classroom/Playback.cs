@@ -25,7 +25,6 @@ internal sealed class PlaybackWindow : ClassroomWindow
     private readonly DispatcherTimer _timer;
     private readonly long _opened = Stopwatch.GetTimestamp();
     internal Scene Scene { get; }
-    internal Button CloseButton { get; }
     public event Action<Exception>? Error;
 
     // sound is a WAV under Assets.
@@ -36,16 +35,11 @@ internal sealed class PlaybackWindow : ClassroomWindow
         using (var copy = new MemoryStream()) { stream.CopyTo(copy); _sound = copy.ToArray(); }
         SystemDecorations = SystemDecorations.None; WindowState = WindowState.FullScreen;
         Topmost = true; ShowInTaskbar = false; CanResize = false; Background = Night;
-        CloseButton = new Button
-        {
-            Content = "关闭", FontFamily = Font, FontSize = 20, Padding = new Thickness(24, 10), CornerRadius = new CornerRadius(10),
-            HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 24, 24, 0),
-            Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
-        };
-        CloseButton.Click += (_, _) => _stop.Cancel();
+        // No button covers the picture: a tap anywhere or Esc ends it early.
+        PointerPressed += (_, _) => _stop.Cancel();
+        KeyDown += (_, e) => { if (e.Key == Avalonia.Input.Key.Escape) _stop.Cancel(); };
         var layers = new Grid { Children = { scene } };
         if (scene.Overlay is { } overlay) layers.Children.Add(overlay);
-        layers.Children.Add(CloseButton);
         Content = layers;
         _timer = new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Render, (_, _) => Tick());
         Opened += async (_, _) => { _timer.Start(); await PlayAsync(); };
