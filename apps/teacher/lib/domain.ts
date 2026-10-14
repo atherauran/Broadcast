@@ -107,6 +107,10 @@ export function patchRoom(rooms: Classroom[], device: { id: string; name: string
   return rooms.map(room => room.device_id === device.id
     ? { ...room, device_name: device.name, last_seen_at: device.last_seen_at, connected: device.connected } : room);
 }
+// Only a scheduled item starts later than it was created; one sent right away starts at its creation,
+// so the page's clock, which lags the server by up to a few seconds, can never make it look pending.
+export const upcoming = (item: Pick<DisplayItem, 'starts_at' | 'created_at'>, now: number) =>
+  Date.parse(item.starts_at) > Math.max(now, Date.parse(item.created_at));
 // A board saved for later: a draft (no publish_at) or scheduled boards that have not appeared yet.
 export interface SavedBoard {
   id: string; content: BoardContent; classrooms: string[]; ends_at: string | null; publish_at: string | null;
@@ -117,7 +121,7 @@ export type BoardDraftRow = Omit<SavedBoard, 'publish_at'>;
 export function savedBoards(drafts: BoardDraftRow[], items: DisplayItem[], now: number): SavedBoard[] {
   const scheduled = new Map<string, SavedBoard>();
   for (const item of items) {
-    if (item.kind !== 'board' || Date.parse(item.starts_at) <= now) continue;
+    if (item.kind !== 'board' || !upcoming(item, now)) continue;
     const old = scheduled.get(item.request_id);
     if (old) old.classrooms.push(item.classroom_id);
     else scheduled.set(item.request_id, { id: item.request_id, content: item.content, classrooms: [item.classroom_id], ends_at: item.ends_at,

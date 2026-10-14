@@ -136,11 +136,11 @@ var anthem = new SilentAudio();
 var flag = new PlaybackWindow(anthem, "anthem.wav", new FlagScene()) { WindowState = WindowState.Normal, Width = 1366, Height = 768 };
 flag.Show(); Dispatcher.UIThread.RunJobs();
 if (!flag.Topmost || flag.ShowInTaskbar || anthem.Played < 1_000_000) throw new Exception("flag: must be topmost and play the anthem");
-foreach (var (step, progress) in new[] { ("start", 0.0), ("half", .5), ("top", 1.0) })
+foreach (var seconds in new[] { 0, 1 })
 {
-    flag.Scene.Progress = progress; flag.Scene.Seconds = progress * 40; flag.Scene.InvalidateVisual();
+    flag.Scene.Seconds = seconds; flag.Scene.InvalidateVisual();
     AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
-    using var frame = flag.CaptureRenderedFrame(); frame?.Save(Path.Combine(output, "flag-" + step + ".png"));
+    using var frame = flag.CaptureRenderedFrame(); frame?.Save(Path.Combine(output, $"flag-{seconds}.png"));
 }
 flag.CloseButton.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
 for (var i = 0; i < 20 && flag.IsVisible; i++) { Thread.Sleep(10); Dispatcher.UIThread.RunJobs(); }
@@ -218,13 +218,28 @@ var schedule = new ScheduleWindow();
 var monday = new DateOnly(2026, 10, 12);
 schedule.Present(new DaySchedule(monday, ["english", "math", "physics", "chemistry", "lunch", "morality", "it", "pe", "club"]));
 schedule.Show(); Dispatcher.UIThread.RunJobs();
-var header = (TextBlock)((Viewbox)((Border)schedule.Rows.Children[0]).Child!).Child!;
+TextBlock Cell(int row, int index) => ((Border)schedule.Rows.Children[row]).Child switch { Viewbox v => (TextBlock)v.Child!, var c => (TextBlock)((StackPanel)c!).Children[index] };
 var lunch = (Border)schedule.Rows.Children[5];
-if (schedule.Topmost || schedule.ShowInTaskbar || schedule.Rows.Children.Count != 10 || header.Text != "10/12 Monday"
-    || ((TextBlock)((Viewbox)lunch.Child!).Child!).Text != "午餐 Lunch" || lunch.Background is null)
-    throw new Exception("schedule: header, rows or lunch row failed");
+if (schedule.Topmost || schedule.ShowInTaskbar || schedule.Rows.Children.Count != 10 || Cell(0, 0).Text != "10/12 Monday"
+    || Cell(5, 0).Text != "午餐 Lunch" || lunch.Background is null || Cell(1, 1).Text != "8:30–9:10" || Cell(5, 1).Text != "11:50–12:40")
+    throw new Exception("schedule: header, rows, times or lunch row failed");
+// 8-4's Wednesday: four lessons, lunch, five more.
+var wednesday = ScheduleWindow.Times(["chinese", "chinese", "math", "pe", "lunch", "english", "english", "physics", "biology", "club"])
+    .Select(t => $"{t.Start:H:mm}-{t.End:H:mm}");
+if (string.Join(" ", wednesday) != "8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:20-17:00")
+    throw new Exception("schedule: lesson times are wrong: " + string.Join(" ", wednesday));
 if (schedule.RowHeight < 40) throw new Exception("schedule: rows must fill the column readably");
 using (var frame = schedule.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "schedule.png"));
+// A long day under tall day counts leaves short rows; each name and time must still fit its row.
+schedule.Present(new DaySchedule(monday, ["english", "math", "physics", "chemistry", "lunch", "morality", "it", "pe", "club", "art", "history", "biology"]));
+schedule.Place(top: 560); Dispatcher.UIThread.RunJobs();
+foreach (var row in schedule.Rows.Children.OfType<Border>().Skip(1))
+{
+    row.Child!.Measure(Size.Infinity);
+    if (row.Child.DesiredSize.Height > schedule.RowHeight) throw new Exception($"schedule: a {schedule.RowHeight}px row overflows");
+}
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+using (var frame = schedule.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "schedule-short.png"));
 Console.WriteLine($"PASS schedule: {schedule.Bounds.Width:F0}x{schedule.Bounds.Height:F0}, rows {schedule.RowHeight:F0}px");
 var screen = schedule.Screens.Primary!;
 schedule.Dismiss();
@@ -292,7 +307,7 @@ Apply("empty-again", null);
 if (stateDisplay.Open.Any()) throw new Exception("empty: windows left open");
 Console.WriteLine("PASS layout: columns, stacking and on-screen bounds across updates");
 
-// Stands in for the speakers: holds the sound until it is stopped, and never reports it started, so a test sets the flag height itself.
+// Stands in for the speakers: holds the sound until it is stopped.
 sealed class SilentAudio : IAudioPlayer
 {
     public int Played { get; private set; }

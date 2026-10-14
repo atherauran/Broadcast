@@ -57,8 +57,10 @@ describe('display styles', () => {
     const content = { title: '晨会通知', entries: ['升旗'], speak: false, voice_type: 101001 };
     const board = (id: string, request: string, classroom: string, start: number): DisplayItem => ({ id, request_id: request, classroom_id: classroom, kind: 'board', content,
       starts_at: new Date(start).toISOString(), ends_at: new Date(start + 3_600_000).toISOString(), teacher_name: '李老师', created_at: new Date(local).toISOString() });
+    // "now" sent right away: created and started on the server a moment after the page's clock last ticked.
+    const sent = { ...board('d', 'now', '8-4', local + 2_000), created_at: new Date(local + 2_000).toISOString() };
     const items = [board('a1', 'late', '8-1', local + 7_200_000), board('a2', 'late', '8-2', local + 7_200_000), board('b', 'soon', '8-3', local + 60_000),
-      board('c', 'shown', '8-1', local - 60_000)];
+      board('c', 'shown', '8-1', local - 60_000), sent];
     const draft = { id: 'draft', content, classrooms: [], ends_at: null, teacher_name: '王老师', updated_at: new Date(local).toISOString() };
     const list = savedBoards([draft], items, local);
     expect(list.map(b => [b.id, b.classrooms, !!b.publish_at])).toEqual([['soon', ['8-3'], true], ['late', ['8-1', '8-2'], true], ['draft', [], false]]);

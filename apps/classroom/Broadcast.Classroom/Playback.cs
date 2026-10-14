@@ -5,15 +5,12 @@ using Avalonia.Layout;
 using Avalonia.Platform;
 using Avalonia.Threading;
 using Broadcast.Core;
-using NAudio.Wave;
 
 namespace Broadcast.Classroom;
 
-// An animated picture for a fullscreen moment: Seconds since it opened, and Progress through the sound from 0 to 1.
-// Overlay is laid out on top of what the scene draws.
+// An animated picture for a fullscreen moment, Seconds since it opened. Overlay is laid out on top of what the scene draws.
 internal abstract class Scene : Control
 {
-    public double Progress { get; set; }
     public double Seconds { get; set; }
     public virtual Control? Overlay => null;
     public virtual void Advance() => InvalidateVisual();
@@ -24,11 +21,9 @@ internal sealed class PlaybackWindow : ClassroomWindow
 {
     private readonly IAudioPlayer _audio;
     private readonly byte[] _sound;
-    private readonly TimeSpan _length;
     private readonly CancellationTokenSource _stop = new();
     private readonly DispatcherTimer _timer;
     private readonly long _opened = Stopwatch.GetTimestamp();
-    private long _started;
     internal Scene Scene { get; }
     internal Button CloseButton { get; }
     public event Action<Exception>? Error;
@@ -39,7 +34,6 @@ internal sealed class PlaybackWindow : ClassroomWindow
         _audio = audio; Scene = scene;
         using (var stream = AssetLoader.Open(new Uri($"avares://{typeof(PlaybackWindow).Assembly.GetName().Name}/Assets/{sound}")))
         using (var copy = new MemoryStream()) { stream.CopyTo(copy); _sound = copy.ToArray(); }
-        using (var reader = new WaveFileReader(new MemoryStream(_sound, false))) _length = reader.TotalTime;
         SystemDecorations = SystemDecorations.None; WindowState = WindowState.FullScreen;
         Topmost = true; ShowInTaskbar = false; CanResize = false; Background = Night;
         CloseButton = new Button
@@ -61,7 +55,6 @@ internal sealed class PlaybackWindow : ClassroomWindow
     private void Tick()
     {
         Scene.Seconds = Stopwatch.GetElapsedTime(_opened).TotalSeconds;
-        if (_started != 0) Scene.Progress = Stopwatch.GetElapsedTime(_started) / _length;
         Scene.Advance();
     }
 
@@ -69,7 +62,7 @@ internal sealed class PlaybackWindow : ClassroomWindow
     {
         try
         {
-            await _audio.PlayAsync(_sound, () => Dispatcher.UIThread.Post(() => _started = Stopwatch.GetTimestamp()), _stop.Token);
+            await _audio.PlayAsync(_sound, () => { }, _stop.Token);
             await Task.Delay(TimeSpan.FromSeconds(3), _stop.Token);
         }
         catch (OperationCanceledException) { }

@@ -4,7 +4,6 @@
     <PackageReference Include="Avalonia.Headless" Version="11.3.21" />
     <PackageReference Include="Avalonia.Skia" Version="11.3.21" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.21" />
-    <PackageReference Include="NAudio.Core" Version="2.4.0" />
     <ProjectReference Include="../Broadcast.Core/Broadcast.Core.csproj" />
     <Compile Include="../Broadcast.Classroom/BroadcastWindow.cs" Link="BroadcastWindow.cs" />
     <Compile Include="../Broadcast.Classroom/BannerWindow.cs" Link="BannerWindow.cs" />

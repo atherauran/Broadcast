@@ -35,12 +35,6 @@
           "Avalonia": "11.3.21"
         }
       },
-      "NAudio.Core": {
-        "type": "Direct",
-        "requested": "[2.4.0, )",
-        "resolved": "2.4.0",
-        "contentHash": "VDXi1Wp1CUFgMxYyyajaG8sM9c9v5Mf2AdJkYUnksqwENSqVlrXsPe9l/mG55pNIv9eMYXGHiIxVuhS7+a3BQg=="
-      },
       "Avalonia": {
         "type": "Transitive",
         "resolved": "11.3.21",

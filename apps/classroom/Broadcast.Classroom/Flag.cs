@@ -44,20 +44,9 @@ internal sealed class FlagIcon : Control
     public override void Render(DrawingContext context) => FlagArt.Draw(context, new Rect(Bounds.Size));
 }
 
-// A flag waving on its pole, raised from the bottom to the top as the anthem plays.
+// The flag filling the screen, waving from its hoist edge.
 internal sealed class FlagScene : Scene
 {
-    private static readonly IBrush Sky = new LinearGradientBrush
-    {
-        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative), EndPoint = new RelativePoint(0, 1, RelativeUnit.Relative),
-        GradientStops = { new GradientStop(Color.Parse("#1D5FB4"), 0), new GradientStop(Color.Parse("#9CCDF2"), 1) },
-    }.ToImmutable();
-    private static readonly IBrush Pole = new LinearGradientBrush
-    {
-        StartPoint = new RelativePoint(0, 0, RelativeUnit.Relative), EndPoint = new RelativePoint(1, 0, RelativeUnit.Relative),
-        GradientStops = { new GradientStop(Color.Parse("#8A949E"), 0), new GradientStop(Color.Parse("#F4F6F8"), .4), new GradientStop(Color.Parse("#6B7580"), 1) },
-    }.ToImmutable();
-    private static readonly IBrush Gold = new SolidColorBrush(Color.Parse("#E9B949")).ToImmutable();
     private RenderTargetBitmap? _flag;
 
     public FlagScene() { SizeChanged += (_, _) => { _flag?.Dispose(); _flag = null; }; }
@@ -66,16 +55,10 @@ internal sealed class FlagScene : Scene
     {
         var (w, h) = (Bounds.Width, Bounds.Height);
         if (w < 1 || h < 1) return;
-        context.FillRectangle(Sky, new Rect(Bounds.Size));
-        var fw = Math.Min(w * .36, h * .5);
+        // As large as the screen allows, with room left for the wave.
+        var fw = Math.Min(w * .94, h * .9 * 1.5);
         var fh = fw * 2 / 3;
-        var poleWidth = Math.Max(6, w * .006);
-        var poleX = (w - fw) / 2 - poleWidth;
-        var ball = poleWidth * 1.4;
-        var poleTop = h * .05 + ball * 2;
-        context.FillRectangle(Pole, new Rect(poleX, poleTop, poleWidth, h - poleTop));
-        context.DrawEllipse(Gold, null, new Point(poleX + poleWidth / 2, poleTop - ball + 1), ball, ball);
-
+        var (left, top) = ((w - fw) / 2, (h - fh) / 2);
         var scale = TopLevel.GetTopLevel(this)?.RenderScaling ?? 1;
         if (_flag is null)
         {
@@ -83,19 +66,16 @@ internal sealed class FlagScene : Scene
             using var art = _flag.CreateDrawingContext();
             FlagArt.Draw(art, new Rect(_flag.Size));
         }
-        var lowest = h - fh - h * .06;
-        var top = lowest + (poleTop + poleWidth - lowest) * Math.Clamp(Progress, 0, 1);
-        // Vertical strips ride a travelling wave that grows away from the pole, and are shaded by their slope.
+        // Vertical strips ride a travelling wave that grows away from the hoist, and are shaded by their slope.
         const double strip = 4;
         var count = (int)Math.Ceiling(fw / strip);
         for (var i = 0; i < count; i++)
         {
             var u = (i + .5) / count;
             var phase = u * 2.6 * Math.PI - Seconds * 3.4;
-            var dy = fh * .055 * u * Math.Sin(phase);
             var x = i * strip;
             var width = Math.Min(strip, fw - x);
-            var dest = new Rect(poleX + poleWidth + x, top + dy, width + .6, fh);
+            var dest = new Rect(left + x, top + fh * .04 * u * Math.Sin(phase), width + .6, fh);
             context.DrawImage(_flag, new Rect(x, 0, width, fh), dest);
             var slope = Math.Cos(phase) * (.3 + .7 * u);
             context.FillRectangle(new SolidColorBrush(slope > 0 ? Colors.White : Colors.Black, Math.Abs(slope) * .16), dest);

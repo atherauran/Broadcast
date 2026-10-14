@@ -340,7 +340,7 @@ internal sealed class ColumnFlow : Panel
 // Notes stack down the column beside the timetable, in an ordinary desktop window that other windows can cover.
 internal sealed class NotesWindow : StateWindow
 {
-    public const double ColumnWidth = 270, Gap = 12;
+    public const double ColumnWidth = 256, Gap = 12;
     private static readonly Dictionary<string, string> Colors = new()
     { ["yellow"] = "#FFF1A8", ["blue"] = "#D3E5FF", ["green"] = "#D2F0DC", ["pink"] = "#FFD9E6" };
     private readonly ColumnFlow _cards = new() { Gap = Gap };
@@ -441,7 +441,8 @@ internal sealed class DayCountWindow : StateWindow
 // Today's timetable down the right edge, an ordinary desktop window like the notes.
 internal sealed class ScheduleWindow : StateWindow
 {
-    public const double ColumnWidth = 224, MaxRow = 96;
+    public const double ColumnWidth = 216, MaxRow = 96;
+    private const double HeaderSize = 28, NameSize = 23, TimeSize = 17;
     private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#1F2937")).ToImmutable();
     private static readonly IBrush Lunch = new SolidColorBrush(Color.Parse("#FDEBC0")).ToImmutable();
     private static readonly Dictionary<string, string> Names = new()
@@ -451,6 +452,9 @@ internal sealed class ScheduleWindow : StateWindow
         ["morality"] = "道德与法治", ["art"] = "艺术 Art/Music", ["it"] = "信息科技 IT", ["elective"] = "选修 Optional", ["club"] = "社团 Club",
         ["lunch"] = "午餐 Lunch",
     };
+    // Lessons last 40 minutes with 15-minute breaks from 8:30 and from 12:40; the lesson before lunch ends 5 minutes early.
+    private static readonly TimeOnly MorningStart = new(8, 30), AfternoonStart = new(12, 40);
+    private const int Lesson = 40, Break = 15, LunchEarly = 5;
     private readonly StackPanel _rows = new();
     private DaySchedule? _today;
     internal StackPanel Rows => _rows;
@@ -468,6 +472,22 @@ internal sealed class ScheduleWindow : StateWindow
 
     public void Present(DaySchedule today) { _today = today; Relayout(); }
 
+    // Each row's start and end: lessons before lunch count from the morning start, those after it from the afternoon start.
+    internal static (TimeOnly Start, TimeOnly End)[] Times(string[] periods)
+    {
+        var lunch = Array.IndexOf(periods, "lunch");
+        var times = new (TimeOnly Start, TimeOnly End)[periods.Length];
+        for (var i = 0; i < periods.Length; i++)
+        {
+            if (i == lunch) continue;
+            var morning = lunch < 0 || i < lunch;
+            var start = (morning ? MorningStart : AfternoonStart).AddMinutes((morning ? i : i - lunch - 1) * (Lesson + Break));
+            times[i] = (start, start.AddMinutes(i == lunch - 1 ? Lesson - LunchEarly : Lesson));
+        }
+        if (lunch >= 0) times[lunch] = (lunch > 0 ? times[lunch - 1].End : AfternoonStart, AfternoonStart);
+        return times;
+    }
+
     // Rows share the height left below the day counts, up to a comfortable maximum; text shrinks only when a name is too wide.
     protected override void Relayout()
     {
@@ -475,23 +495,32 @@ internal sealed class ScheduleWindow : StateWindow
         if (_today is not { } today) return;
         _rows.Children.Clear();
         RowHeight = Math.Floor(Math.Clamp((ScreenHeight - Top - 6) / (today.Periods.Length + 1), 18, MaxRow));
-        var size = Math.Clamp(RowHeight * .36, 15, 30);
-        Add($"{today.Date.Month}/{today.Date.Day} {today.Date.DayOfWeek}", size * 1.2, FontWeight.Bold, null);
-        foreach (var id in today.Periods) Add(Names.GetValueOrDefault(id, id), size, FontWeight.SemiBold, id == "lunch" ? Lunch : null);
-
-        void Add(string text, double fontSize, FontWeight weight, IBrush? fill)
+        // Fixed sizes; only a row too short for both lines, or a name too long for the column, scales them down.
+        var fit = Math.Min(1, (RowHeight - 10) / ((NameSize + TimeSize) * 1.33));
+        var header = Text($"{today.Date.Month}/{today.Date.Day} {today.Date.DayOfWeek}", HeaderSize * fit, "#1F2937", FontWeight.Bold);
+        header.TextWrapping = TextWrapping.NoWrap;
+        Add(new Viewbox { StretchDirection = StretchDirection.DownOnly, Child = header,
+            HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, null);
+        var names = today.Periods.Select(id => Text(Names.GetValueOrDefault(id, id), NameSize * fit, "#1F2937", FontWeight.SemiBold)).ToArray();
+        var widest = names.Max(name => { name.TextWrapping = TextWrapping.NoWrap; name.Measure(Size.Infinity); return name.DesiredSize.Width; });
+        var nameSize = NameSize * fit * Math.Min(1, (ColumnWidth - 6 - 28) / widest);
+        var times = Times(today.Periods);
+        for (var i = 0; i < names.Length; i++)
         {
-            var label = Text(text, fontSize, "#1F2937", weight);
-            label.TextWrapping = TextWrapping.NoWrap;
-            _rows.Children.Add(new Border
-            {
-                Height = RowHeight, Padding = new Thickness(14, 0), Background = fill,
-                // A heavier line under the date header.
-                BorderBrush = Ink, BorderThickness = new Thickness(0, _rows.Children.Count switch { 0 => 0, 1 => 3, _ => 1.5 }, 0, 0),
-                Child = new Viewbox { StretchDirection = StretchDirection.DownOnly, Child = label,
-                    HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center },
-            });
+            names[i].FontSize = nameSize;
+            var clock = Text($"{times[i].Start:H:mm}–{times[i].End:H:mm}", TimeSize * fit, "#64748B", FontWeight.Medium);
+            names[i].HorizontalAlignment = clock.HorizontalAlignment = HorizontalAlignment.Center;
+            Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { names[i], clock } }, today.Periods[i] == "lunch" ? Lunch : null);
         }
+
+        // Each row is centered: a lesson's name with its time beneath it, or the date header.
+        void Add(Control content, IBrush? fill) => _rows.Children.Add(new Border
+        {
+            Height = RowHeight, Padding = new Thickness(14, 0), Background = fill,
+            // A heavier line under the date header.
+            BorderBrush = Ink, BorderThickness = new Thickness(0, _rows.Children.Count switch { 0 => 0, 1 => 3, _ => 1.5 }, 0, 0),
+            Child = content,
+        });
     }
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Check, ChevronRight, ClipboardList, StickyNote, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { clockText, daysUntil, isOnline, remaining, type Classroom, type DisplayItem } from '@/lib/domain';
+import { clockText, daysUntil, isOnline, remaining, upcoming, type Classroom, type DisplayItem } from '@/lib/domain';
 import { roomStatus } from './class-picker';
 import { EditItem } from './edit-item';
 
@@ -26,7 +26,7 @@ export function OnScreen({ items, rooms, known, now, ready, busy, onRemove, onEd
   const [picked, setPicked] = useState<string[]>([]);
   const [editing, setEditing] = useState(false);
   // Scheduled boards that have not appeared yet are listed with the board drafts instead.
-  const live = items.filter(item => Date.parse(item.starts_at) <= now && Date.parse(item.ends_at) > now);
+  const live = items.filter(item => !upcoming(item, now) && Date.parse(item.ends_at) > now);
   // Items that ended or were removed elsewhere drop out of the selection on their own.
   const selected = picked.filter(id => live.some(item => item.id === id));
   const chosen = live.filter(item => selected.includes(item.id));

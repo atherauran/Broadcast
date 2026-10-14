@@ -29,7 +29,13 @@ internal static class BirthdayArt
     public static Border Card(IReadOnlyList<Celebration> birthdays, DateOnly today)
     {
         var names = new StackPanel { Spacing = 2 };
-        foreach (var birthday in birthdays) names.Children.Add(Text(Label(birthday, today), 22, FontWeight.SemiBold));
+        // One line per student, shrunk rather than broken when a name with its weekday is long.
+        foreach (var birthday in birthdays)
+        {
+            var name = Text(Label(birthday, today), 22, FontWeight.SemiBold);
+            name.TextWrapping = TextWrapping.NoWrap;
+            names.Children.Add(new Viewbox { StretchDirection = StretchDirection.DownOnly, Child = name });
+        }
         return new Border
         {
             Width = NotesWindow.ColumnWidth, Padding = new Thickness(14, 12), CornerRadius = new CornerRadius(12), Background = Background,
@@ -53,7 +59,7 @@ internal sealed class BirthdayScene : Scene
         var random = new Random(11);
         _confetti = Enumerable.Range(0, 150).Select(_ => (random.NextDouble(), random.NextDouble(), .07 + random.NextDouble() * .1, 8 + random.NextDouble() * 10,
             Colors[random.Next(Colors.Length)], random.NextDouble() * 6 - 3, 6 + random.NextDouble() * 18, random.NextDouble() * Math.Tau)).ToArray();
-        var title = BirthdayArt.Text("生日快乐！", 150);
+        var title = BirthdayArt.Text("Happy Birthday!", 140);
         title.RenderTransform = _bounce; title.RenderTransformOrigin = RelativePoint.Center;
         title.Effect = new DropShadowEffect { Color = Color.Parse("#5B21B6"), BlurRadius = 16, OffsetX = 0, OffsetY = 6, Opacity = .55 };
         var names = BirthdayArt.Text(string.Join("　", birthdays.Select(b => BirthdayArt.Label(b, today))), 64, FontWeight.SemiBold);
@@ -65,7 +71,7 @@ internal sealed class BirthdayScene : Scene
             Child = new StackPanel
             {
                 Width = 1400,
-                Children = { BirthdayArt.Text("🎂", 130, FontWeight.Normal), title, BirthdayArt.Text("Happy Birthday", 56, FontWeight.SemiBold), names },
+                Children = { BirthdayArt.Text("🎂", 130, FontWeight.Normal), title, names },
             },
         };
     }
