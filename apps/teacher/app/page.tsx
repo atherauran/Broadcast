@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, LogOut, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
+import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getHistory, getOverview, getSchedules, once, rpc, supabase } from '@/lib/api';
+import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getHistory, getOverview, getSchedules, maintainerEmail, once, rpc, supabase } from '@/lib/api';
 import { CLASSROOM_IDS, boardEntries, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
-  type BirthdayList, type SavedBoard, type Schedule, type Week } from '@/lib/domain';
+  type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Week } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
 import { blankBoard, initialDrafts, type Drafts, type Patch } from './compose/drafts';
@@ -16,11 +16,16 @@ import { OnScreen } from './on-screen';
 import { Devices } from './devices';
 import { BirthdayEditor, type BirthdayRow } from './birthdays';
 import { ScheduleEditor } from './schedule';
+import { FeedbackDialog, FeedbackNews } from './feedback';
 
 const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
 const teacherKey = 'broadcast-teacher-session-v2';
 const rememberedTeacher = () => localStorage.getItem(teacherKey)?.trim() || '';
+const introKey = 'broadcast-feedback-intro';
+// The newest feedback activity each teacher name has seen in this browser.
+const seenKey = 'broadcast-feedback-seen';
+const readSeen = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(seenKey) || '{}'); } catch { return {}; } };
 // An empty endAt means the end of the day the item starts.
 const endsAt = (endAt: string, start: number) => new Date(endAt || endOfDay(start)).toISOString();
 
@@ -42,6 +47,10 @@ export default function App() {
   const [birthdays, setBirthdays] = useState<BirthdayList[]>([]);
   const [birthdayDrafts, setBirthdayDrafts] = useState<Record<string, BirthdayRow[]>>({});
   const [weekDrafts, setWeekDrafts] = useState<Record<string, Week>>({});
+  const [feedback, setFeedback] = useState<Feedback[] | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState<{ focus: string | null } | null>(null);
+  const [seenMap, setSeenMap] = useState(readSeen);
+  const [intro, setIntro] = useState(() => !localStorage.getItem(introKey));
   const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'schedule' | 'birthdays' | 'devices'>('send');
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -55,6 +64,7 @@ export default function App() {
   const historyRef = useRef(history);
   const sw = useRegisterSW();
   const userId = session?.user.id;
+  const maintainer = session?.user.app_metadata.maintainer === true;
 
   useEffect(() => {
     if (!supabase) return;
@@ -100,6 +110,7 @@ export default function App() {
     const result = await getClassrooms();
     sync(result.server_now); setRooms(result.classrooms);
   }, [sync]);
+  const refreshFeedback = useCallback(async () => setFeedback(await getFeedback()), []);
   const refreshOverview = useCallback(async () => {
     const result = await getOverview();
     sync(result.server_now); setOverview(result.items);
@@ -112,8 +123,8 @@ export default function App() {
     const load = async () => {
       try {
         await refreshRooms();
-        const [items, weeks, saved, lists] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), refreshOverview()]);
-        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); setBirthdays(lists); }
+        const [items, weeks, saved, lists, tickets] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), getFeedback(), refreshOverview()]);
+        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); setBirthdays(lists); setFeedback(tickets); }
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
@@ -135,6 +146,8 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'birthdays' }, payload => {
         if (payload.eventType !== 'DELETE') setBirthdays(old => patchBirthdays(old, payload.new as BirthdayList));
       })
+      // Comments touch their feedback row too, so this one table covers all feedback activity.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback' }, () => { void refreshFeedback().catch(e => setError(message(e))); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'deliveries' }, payload => {
         if (payload.eventType === 'DELETE') return;
         const row = payload.new as DeliveryRow;
@@ -162,7 +175,7 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', resume);
     return () => { disposed = true; document.removeEventListener('visibilitychange', resume); void supabase!.removeChannel(channel); };
-  }, [userId, network, refreshRooms, refreshOverview, mergeHistory]);
+  }, [userId, network, refreshRooms, refreshOverview, refreshFeedback, mergeHistory]);
   useEffect(() => { localStorage.setItem('broadcast-draft', drafts.alert.body); }, [drafts.alert.body]);
   const patch: Patch = useCallback((key, change) => setDrafts(old => ({ ...old, [key]: { ...old[key], ...change } })), []);
 
@@ -175,13 +188,15 @@ export default function App() {
       const { error } = await supabase!.auth.signOut({ scope: 'local' });
       if (error) throw error;
       localStorage.removeItem(teacherKey);
-      setTeacherName(''); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms);
+      setTeacherName(''); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms); setFeedback(null); setFeedbackOpen(null);
     });
   }
   async function login() {
     if (!validTeacherName(loginName)) { setError('请输入 1–40 字老师姓名'); return; }
     await run('login', async () => {
-      const result = await supabase!.auth.signInWithPassword({ email: adminEmail, password });
+      let result = await supabase!.auth.signInWithPassword({ email: adminEmail, password });
+      // The maintainer signs in on the same form with their own password.
+      if (result.error) result = await supabase!.auth.signInWithPassword({ email: maintainerEmail, password });
       if (result.error) throw new Error('密码不正确或登录服务暂不可用');
       if (result.data.user.app_metadata.role !== 'admin') { await supabase!.auth.signOut(); throw new Error('此账号没有管理员权限'); }
       const name = loginName.trim();
@@ -273,6 +288,36 @@ export default function App() {
     setSelected(item.deliveries.map(d => d.classroom_id));
     setTab('send'); setLatestId(null); window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+  // Teachers follow the maintainer's replies to their own feedback; the maintainer follows all activity.
+  const mark = (item: Feedback) => maintainer ? item.updated_at : item.teacher_name === teacherName ? item.replied_at : null;
+  const latestMark = (feedback ?? []).reduce((max, item) => { const at = mark(item); return at && at > max ? at : max; }, '');
+  const seen = seenMap[teacherName];
+  const unread = !!feedback && seen !== undefined && latestMark > seen;
+  function markSeen(at: string) {
+    const next = { ...seenMap, [teacherName]: at };
+    localStorage.setItem(seenKey, JSON.stringify(next)); setSeenMap(next);
+  }
+  // Nothing is announced until this browser has opened feedback or sent some, so old replies never pop up on a new device.
+  const news = !maintainer && unread && !feedbackOpen ? feedback.filter(item => item.teacher_name === teacherName && item.replied_at && item.replied_at > seen) : [];
+  function openFeedback(focus: string | null = null) {
+    setFeedbackOpen({ focus });
+    if (intro) { localStorage.setItem(introKey, '1'); setIntro(false); }
+  }
+  function closeFeedback() { setFeedbackOpen(null); markSeen(latestMark); }
+  async function submitFeedback(kind: FeedbackKind, body: string) {
+    await once('feedback-attempt', [kind, body, teacherName], id => rpc('submit_feedback', { p_id: id, p_kind: kind, p_body: body, p_teacher_name: teacherName }));
+    if (seen === undefined) markSeen(latestMark);
+    if (!live) await refreshFeedback();
+  }
+  async function commentFeedback(id: string, body: string) {
+    await once('comment-attempt', [id, body, teacherName], cid => rpc('comment_feedback', { p_id: cid, p_feedback: id, p_body: body, p_teacher_name: teacherName }));
+    if (!live) await refreshFeedback();
+  }
+  async function setFeedbackStatus(id: string, status: FeedbackStatus) {
+    await rpc('set_feedback_status', { p_feedback: id, p_status: status });
+    if (!live) await refreshFeedback();
+  }
+
   const known = configured && !!session && live && network;
   const ready = configured && !!session && network && validTeacherName(teacherName);
   const latest = history.find(b => b.id === latestId);
@@ -290,6 +335,12 @@ export default function App() {
       <div className="header-actions">
         <span className="teacher-chip">{teacherName}</span>
         <Button variant="ghost" className="icon-action" aria-label="设备管理" onClick={() => setTab('devices')}><Settings2 size={20} /></Button>
+        {session && <span className="feedback-anchor">
+          <Button variant="ghost" className="icon-action" aria-label="反馈" onClick={() => openFeedback()}><MessageSquareText size={19} /></Button>
+          {maintainer && unread && !feedbackOpen && <span className="unread-dot" />}
+          {intro && !news.length && <div className="intro-bubble">遇到问题或者有建议，都可以写在这里
+            <button onClick={() => { localStorage.setItem(introKey, '1'); setIntro(false); }}>知道了</button></div>}
+        </span>}
         {session && <Button variant="ghost" className="icon-action" aria-label="退出登录" onClick={logout}><LogOut size={19} /></Button>}
       </div>
     </header>
@@ -341,5 +392,8 @@ export default function App() {
       {tab === 'devices' && <Devices rooms={rooms} ready={ready} busy={busy} onBack={() => setTab('send')}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })} />}
     </main>
+    {feedbackOpen && <FeedbackDialog items={feedback ?? []} maintainer={maintainer} focus={feedbackOpen.focus} onClose={closeFeedback}
+      onSubmit={submitFeedback} onComment={commentFeedback} onStatus={setFeedbackStatus} />}
+    {news.length > 0 && <FeedbackNews items={news} onDismiss={() => markSeen(latestMark)} onView={() => openFeedback(news[0].id)} />}
   </div>;
 }

@@ -6,9 +6,9 @@ const first = '20000000-0000-4000-8000-000000000001';
 const second = '20000000-0000-4000-8000-000000000002';
 const third = '20000000-0000-4000-8000-000000000003';
 let db: PGlite;
-async function identity(id: string, role = 'device') {
+async function identity(id: string, role = 'device', maintainer = false) {
   await db.exec('reset role');
-  await db.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ sub: id, role: 'authenticated', app_metadata: { role } })]);
+  await db.query("select set_config('request.jwt.claims', $1, false)", [JSON.stringify({ sub: id, role: 'authenticated', app_metadata: { role, maintainer } })]);
   await db.exec('set role authenticated');
 }
 async function scalar<T>(sql: string, args: unknown[] = []) { return Object.values((await db.query<Record<string, T>>(sql, args)).rows[0])[0]; }
@@ -304,6 +304,28 @@ describe('board themes and schedules', () => {
     await expect(save('8-1', [{ name: '错', date: '2013-01-02' }])).rejects.toThrow('日期');
     await expect(save('8-1', [{ name: ' ', date: '01-02' }])).rejects.toThrow('姓名');
     await identity(first); await expect(save('8-3', [])).rejects.toThrow('管理员');
+  });
+  it('lets teachers submit and discuss feedback while only the maintainer changes its status', async () => {
+    const id = crypto.randomUUID();
+    const comment = (body: string) => db.query('select comment_feedback($1,$2,$3,$4)', [crypto.randomUUID(), id, body, '钱老师']);
+    const replied = () => scalar<string | null>('select replied_at::text from feedback where id=$1', [id]);
+    await identity(admin, 'admin');
+    await db.query('select submit_feedback($1,$2,$3,$4)', [id, 'bug', ' 课程表不显示 ', '钱老师']);
+    await db.query('select submit_feedback($1,$2,$3,$4)', [id, 'bug', '课程表不显示', '钱老师']);
+    expect(await scalar<number>('select count(*)::int from feedback')).toBe(1);
+    await comment('补充一下，是 8-3 班');
+    expect(await replied()).toBeNull();
+    await expect(db.query('select set_feedback_status($1,$2)', [id, 'done'])).rejects.toThrow('维护者');
+    await expect(db.query('select submit_feedback($1,$2,$3,$4)', [crypto.randomUUID(), 'idea', '内容', '钱老师'])).rejects.toThrow('类型');
+    await identity(admin, 'admin', true);
+    await db.query('select set_feedback_status($1,$2)', [id, 'install']);
+    await comment('已修好，等教室电脑更新');
+    expect(await replied()).not.toBeNull();
+    const rows = await db.query<{ body: string; maintainer: boolean }>('select body, maintainer from feedback_comments where feedback_id=$1 order by created_at', [id]);
+    expect(rows.rows).toEqual([{ body: '补充一下，是 8-3 班', maintainer: false }, { body: '已修好，等教室电脑更新', maintainer: true }]);
+    expect(await scalar<string>('select status from feedback where id=$1', [id])).toBe('install');
+    await identity(first); expect(await scalar<number>('select count(*)::int from feedback')).toBe(0);
+    await expect(comment('伪造')).rejects.toThrow('管理员');
   });
   it('rejects malformed schedules and non-admin writes', async () => {
     await identity(admin, 'admin');

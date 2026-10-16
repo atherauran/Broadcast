@@ -297,3 +297,13 @@ export function pastedBirthdays(text: string): Birthday[] {
     return date && name ? [{ name, date }] : [];
   });
 }
+
+export type FeedbackKind = 'feature' | 'bug' | 'other';
+export type FeedbackStatus = 'open' | 'doing' | 'install' | 'done' | 'declined';
+export const FEEDBACK_KINDS: Record<FeedbackKind, string> = { feature: '新功能', bug: '问题 Bug', other: '其他' };
+export const FEEDBACK_STATUSES: Record<FeedbackStatus, string> = { open: '待处理', doing: '处理中', install: '开发完成，待安装', done: '已完成', declined: '已拒绝' };
+export type FeedbackComment = { id: string; body: string; teacher_name: string; maintainer: boolean; created_at: string };
+export type Feedback = {
+  id: string; kind: FeedbackKind; body: string; teacher_name: string; status: FeedbackStatus;
+  created_at: string; updated_at: string; replied_at: string | null; feedback_comments: FeedbackComment[];
+};
