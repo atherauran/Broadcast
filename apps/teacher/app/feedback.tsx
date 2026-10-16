@@ -40,7 +40,7 @@ export function FeedbackDialog({ items, maintainer, focus, onClose, onSubmit, on
         void run(() => onSubmit(kind!, body)).then(ok => { if (ok) { setBody(''); setKind(null); } });
       }}>
         <Textarea className="broadcast-input short" aria-label="反馈内容" maxLength={1000} value={body} onChange={e => setBody(e.target.value)}
-          placeholder="写下遇到的问题或建议，我看到之后会尽快处理的哈" />
+          placeholder="写下遇到的问题或功能建议" />
         <div className="ticket-form-bottom">
           <div className="choice-row">
             {(Object.keys(FEEDBACK_KINDS) as FeedbackKind[]).map(k =>
