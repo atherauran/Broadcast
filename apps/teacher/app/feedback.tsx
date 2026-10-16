@@ -76,7 +76,7 @@ function Ticket({ item, maintainer, busy, open, onToggle, run, onComment, onStat
     </button>
     {open && <div className="ticket-detail">
       {comments.map(c => <div key={c.id} className={'comment' + (c.maintainer ? ' maintainer' : '')}>
-        <div className="comment-meta"><strong>{c.teacher_name}</strong>{c.maintainer && <span className="maintainer-tag">维护者</span>}<span>{time(c.created_at)}</span></div>
+        <div className="comment-meta"><strong>{c.teacher_name}</strong><span>{time(c.created_at)}</span></div>
         <p>{c.body}</p>
       </div>)}
       {maintainer && <label className="ticket-status-field">状态

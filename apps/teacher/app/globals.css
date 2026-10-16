@@ -209,9 +209,8 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .status-done { background: #e1f4ea; color: #157748; } .status-declined { background: #f6e8e8; color: #9b3a3a; }
 .ticket-detail { display: grid; gap: 6px; padding: 0 2px 12px; }
 .comment { padding: 7px 10px; border-radius: 10px; background: #f5f7fa; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.comment.maintainer { background: #edf3ff; box-shadow: 3px 0 0 #2563eb inset; }
+.comment.maintainer { background: #edf3ff; }
 .comment-meta { display: flex; align-items: baseline; gap: 6px; margin-bottom: 1px; color: #7b879a; font-size: 12px; } .comment-meta strong { color: #344158; font-size: 13px; font-weight: 600; }
-.maintainer-tag { padding: 0 6px; border-radius: 6px; background: #2563eb; color: #fff; font-size: 11px; font-weight: 600; line-height: 17px; }
 .ticket-status-field { display: flex; align-items: center; gap: 8px; margin-top: 2px; color: #526078; font-size: 14px; } .ticket-status-field .period-select { flex: none; height: 36px; min-height: 36px; font-size: 14px; }
 .comment-form { display: flex; gap: 6px; margin-top: 2px; } .comment-form input { height: 38px; font-size: 15px; background: #fafbfd; border-radius: 10px; } .comment-form .action { height: 38px; padding: 0 14px; }
 .ticket-more { display: flex; align-items: center; gap: 4px; margin: 10px auto 0; border: 0; background: transparent; color: #255bb8; font-size: 14px; }
