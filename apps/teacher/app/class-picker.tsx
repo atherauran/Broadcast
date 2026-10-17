@@ -14,7 +14,7 @@ export function ClassPicker({ rooms, known, now, selected, setSelected }: {
   const toggle = (id: string) => setSelected(old => old.includes(id) ? old.filter(other => other !== id) : [...old, id]);
   return <section className="section classrooms-section">
     <div className="section-heading">
-      <div><h1>选择班级</h1><p className="muted">{known ? `${rooms.filter(r => isOnline(r, now)).length} / ${total} 个班级在线` : `8 年级 · 共 ${total} 个班级`}</p></div>
+      <div className="heading-title"><h1>选择班级</h1><span className="muted">{known ? `${rooms.filter(r => isOnline(r, now)).length} / ${total} 个班级在线` : `8 年级 · 共 ${total} 个班级`}</span></div>
       <button className="select-all" onClick={() => setSelected(() => all ? [] : rooms.map(room => room.id))}>{all ? <Check size={17} /> : <Square size={17} />}{all ? '取消全选' : '全选'}</button>
     </div>
     <div className="class-grid">{rooms.map(room => {
