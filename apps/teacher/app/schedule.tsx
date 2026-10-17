@@ -25,7 +25,8 @@ export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, rea
   const { days: week, duties } = table;
   const rows = dutyRows(duties);
   const valid = rows.every(duty => duty.task && Array.from(duty.task).length <= 10);
-  const dirty = JSON.stringify({ days: week, duties: rows }) !== JSON.stringify(savedTable);
+  // The database returns each job as {days, task} (jsonb sorts keys), so the saved side goes through dutyRows too before comparing.
+  const dirty = JSON.stringify({ days: week, duties: rows }) !== JSON.stringify({ days: savedTable.days, duties: dutyRows(savedTable.duties) });
   const periods = week[day];
   const change = (next: Partial<Timetable>) => setDrafts(old => ({ ...old, [classroom]: { ...table, ...next } }));
   const edit = (next: string[]) => change({ days: week.map((list, at) => at === day ? next : list) });
