@@ -28,7 +28,8 @@ export function BirthdayEditor({ classes, lists, drafts, setDrafts, now, ready, 
   const students = drafts[classroom] ?? (savedList.length ? shown(savedList) : [blank]);
   const named = students.filter(s => s.name.trim()).map(s => ({ name: s.name.trim(), date: month(s) && day(s) ? `${pad(month(s))}-${pad(day(s))}` : '' }));
   const valid = named.every(s => s.date);
-  const dirty = JSON.stringify(named) !== JSON.stringify(savedList);
+  // The database returns each student as {date, name} (jsonb sorts keys), so match the order before comparing.
+  const dirty = JSON.stringify(named) !== JSON.stringify(savedList.map(({ name, date }) => ({ name, date })));
   const edit = (next: BirthdayRow[]) => setDrafts(old => ({ ...old, [classroom]: next }));
   const change = (index: number, patch: Partial<BirthdayRow>) => edit(students.map((old, at) => at === index ? { ...old, ...patch } : old));
   function pick(id: string) { setClassroom(id); localStorage.setItem(classKey, id); }
