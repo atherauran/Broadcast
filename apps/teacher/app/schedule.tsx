@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, Plus, X } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DAY_PERIODS, DUTY_LIMIT, SCHOOL_DAYS, SUBJECTS, clockText, dutyRows, emptyWeek, type Duty, type Schedule, type Timetable } from '@/lib/domain';
@@ -78,8 +78,7 @@ export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, rea
       {duties.length < DUTY_LIMIT && <Button type="button" variant="outline" className="action add-entry"
         onClick={() => change({ duties: [...duties, blankDuty()] })}><Plus size={17} />添加一项</Button>}
       <div className="composer-bottom">
-        <span>{day < SCHOOL_DAYS.length - 1 &&
-          <Button type="button" variant="outline" className="action" onClick={() => setDay(day + 1)}>{SCHOOL_DAYS[day + 1]}<ChevronRight size={17} /></Button>}</span>
+        <span />
         <div className="send-actions">
           <PhotoImport disabled={!!busy} onError={onError} onLines={lines => { try { imported(lines); } catch (e) { onError((e as Error).message); } }} />
           <Button className="action primary" disabled={!ready || !!busy || !dirty || !valid} onClick={() => void save()}>
