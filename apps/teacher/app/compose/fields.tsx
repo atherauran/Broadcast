@@ -4,7 +4,7 @@ import { zhCN } from 'react-day-picker/locale';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { EMOTIONS, END_DAYS, VOICES, daysUntil, endOfDay, localDate, pad, weekday, type Emotion } from '@/lib/domain';
+import { EMOTIONS, END_DAYS, VOICES, daysUntil, endOfDay, localDate, localInput, pad, shiftDays, weekday, type Emotion } from '@/lib/domain';
 
 const previewUrl = (voice: number) => `${import.meta.env.BASE_URL}voice-previews/${voice}.wav`;
 
@@ -89,6 +89,29 @@ export function DatePick({ value, label, now, min, onChange }: { value: string; 
         disabled={[{ before: asDate(min) }, { after: last }]} onSelect={date => { onChange(localDate(date.getTime())); setOpen(false); }} />
     </PopoverContent>
   </Popover>;
+}
+
+// Ten minutes ahead on the 5-minute grid, as a local "YYYY-MM-DDTHH:mm".
+const soonAt = (now: number) => localInput(Math.ceil((now + 600_000) / 300_000) * 300_000);
+
+// Right away (an empty publishAt) or at a set time. A set end time moves with the publish day, so a template's 08:30 stays on the day the item appears.
+export function PublishPicker({ publishAt, endAt, now, onChange }: {
+  publishAt: string; endAt: string; now: number; onChange: (change: { publishAt: string; endAt: string }) => void;
+}) {
+  const start = publishAt ? Date.parse(publishAt) : now;
+  function pick(next: string) {
+    const days = daysUntil(localDate(next ? Date.parse(next) : now), start);
+    onChange({ publishAt: next, endAt: endAt && shiftDays(endAt, days) });
+  }
+  const [date, time] = publishAt.split('T');
+  return <Option label="发布时间"><div className="choice-row">
+    <button type="button" className={publishAt ? '' : 'active'} aria-pressed={!publishAt} onClick={() => pick('')}>立即</button>
+    <button type="button" className={publishAt ? 'active' : ''} aria-pressed={!!publishAt} onClick={() => !publishAt && pick(soonAt(now))}>定时</button>
+    {publishAt && <>
+      <DatePick value={date} label="发布日期" now={now} min={localDate(now)} onChange={next => pick(`${next}T${time}`)} />
+      <TimeSelect value={time} label="发布时间" onChange={next => pick(`${date}T${next}`)} />
+    </>}
+  </div></Option>;
 }
 
 // An empty endAt means the end of the day the item starts (from), which is today unless it is scheduled.

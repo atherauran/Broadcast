@@ -78,7 +78,7 @@ internal sealed class SetupWindow : Window
         _selected = _currentClass;
         _content.Children.Clear(); _content.Children.Add(Heading("选择所属班级"));
         _content.Children.Add(Note("已被其他电脑绑定的班级无法选择。"));
-        var grid = new UniformGrid { Columns = 2, Rows = 3 };
+        var grid = new UniformGrid { Columns = 2 };
         var buttons = new List<Button>();
         foreach (var room in state.Classrooms)
         {

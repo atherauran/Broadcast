@@ -4,7 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import App from '../app/page';
 import { OnScreen } from '../app/on-screen';
-import type { Classroom, DisplayItem } from '../lib/domain';
+import { CLASSROOM_IDS, type Classroom, type DisplayItem } from '../lib/domain';
 
 let root: Root;
 let host: HTMLDivElement;
@@ -95,7 +95,8 @@ it('picks the type first and shows only the options that apply', async () => {
   expect(entries().map(input => input.value)).toEqual(['明天穿校服', '', '']);
   expect(document.activeElement).toBe(entries()[1]);
   await act(async () => radio('倒计时').click());
-  expect(host.textContent).toContain('25 分钟');
+  expect(host.querySelector('[aria-label="目标日期（年/月/日）"]')).not.toBeNull();
+  await click('按时长'); expect(host.textContent).toContain('25 分钟');
   await act(async () => radio('便签').click());
   const send = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.trim() === '贴上便签');
   expect(send?.disabled).toBe(true);
@@ -113,7 +114,7 @@ it('folds each class on the on-screen tab and removes ticked items together', as
     content: { text, color: 'yellow' }, starts_at: new Date(now).toISOString(), ends_at: new Date(now + 3_600_000).toISOString(), teacher_name: '李老师',
     created_at: new Date(now).toISOString() });
   const items = [note('a1', 'a', '8-1', '带水杯'), note('a2', 'a', '8-2', '带水杯'), note('b', 'b', '8-1', '交作业')];
-  await act(async () => root.render(createElement(OnScreen, { items, rooms, known: false, now, ready: true, busy: '', onRemove, onEdit: vi.fn(), onError: vi.fn() })));
+  await act(async () => root.render(createElement(OnScreen, { items, rooms, classes: CLASSROOM_IDS, known: false, now, ready: true, busy: '', onRemove, onEdit: vi.fn(), onCopy: vi.fn(), onError: vi.fn() })));
   const headings = () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
   expect(headings()[0].getAttribute('aria-expanded')).toBe('false'); expect(host.textContent).not.toContain('带水杯');
   expect(headings()[2].disabled).toBe(true); expect(headings()[2].textContent).toContain('没有显示内容');
@@ -135,7 +136,7 @@ it('edits items that show the same thing, and hides boards that have not appeare
   const board = (id: string, classroom: string, start: number, title = content.title): DisplayItem => ({ id, request_id: id[0], classroom_id: classroom, kind: 'board',
     content: { ...content, title }, starts_at: at(start), ends_at: at(now + 3_600_000), teacher_name: '李老师', created_at: at(now) });
   const items = [board('a1', '8-1', now), board('a2', '8-2', now), board('b', '8-1', now, '作业'), board('later', '8-2', now + 600_000, '明天的')];
-  await act(async () => root.render(createElement(OnScreen, { items, rooms, known: false, now, ready: true, busy: '', onRemove: vi.fn(), onEdit, onError: vi.fn() })));
+  await act(async () => root.render(createElement(OnScreen, { items, rooms, classes: CLASSROOM_IDS, known: false, now, ready: true, busy: '', onRemove: vi.fn(), onEdit, onCopy: vi.fn(), onError: vi.fn() })));
   const headings = () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
   await act(async () => headings()[0].click()); await act(async () => headings()[1].click());
   expect(host.textContent).not.toContain('明天的');
@@ -150,6 +151,27 @@ it('edits items that show the same thing, and hides boards that have not appeare
   await click('保存', document.querySelector('.edit-card')!);
   expect(onEdit).toHaveBeenCalledWith(['a1', 'a2'], { ...content, entries: ['带水杯和雨伞'] }, at(now + 3_600_000));
   expect(document.querySelector('.edit-card')).toBeNull(); expect(host.querySelector('.selection-bar')).toBeNull();
+});
+it('lists scheduled notes with their start and copies ticked items to other classes', async () => {
+  const now = Date.now(); const onCopy = vi.fn(async () => true);
+  const rooms: Classroom[] = ['8-1', '8-2'].map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
+  const at = (ms: number) => new Date(ms).toISOString();
+  const note = (id: string, request: string, classroom: string, start: number): DisplayItem => ({ id, request_id: request, classroom_id: classroom, kind: 'note',
+    content: { text: '下午带伞', color: 'blue' }, starts_at: at(start), ends_at: at(now + 7_200_000), teacher_name: '李老师', created_at: at(now) });
+  const items = [note('a1', 'a', '8-1', now + 3_600_000), note('a2', 'a', '8-2', now + 3_600_000), note('b', 'b', '8-1', now)];
+  await act(async () => root.render(createElement(OnScreen, { items, rooms, classes: CLASSROOM_IDS, known: false, now, ready: true, busy: '', onRemove: vi.fn(), onEdit: vi.fn(), onCopy, onError: vi.fn() })));
+  await act(async () => host.querySelector<HTMLButtonElement>('.screen-heading')!.click());
+  expect(host.querySelectorAll('.screen-item')).toHaveLength(2); expect(host.querySelector('.screen-item .blue')?.textContent).toContain('发布');
+  for (const button of Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-select'))) await act(async () => button.click());
+  await click('选中全部 2 个班级');
+  await click('复制', host.querySelector('.selection-bar')!);
+  const dialog = document.querySelector('.template-card')!;
+  expect(dialog.textContent).toContain('复制 2 项到');
+  const confirm = () => Array.from(dialog.querySelectorAll<HTMLButtonElement>('button')).find(b => b.textContent === '复制')!;
+  expect(confirm().disabled).toBe(true);
+  await click('8-4', dialog); await click('8-3', dialog); await act(async () => confirm().click());
+  expect(onCopy).toHaveBeenCalledWith(['a1', 'b', 'a2'], ['8-3', '8-4']);
+  expect(document.querySelector('.template-card')).toBeNull(); expect(host.querySelector('.selection-bar')).toBeNull();
 });
 it('fills the morning meeting template and schedules a board for later', async () => {
   const radio = (label: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('.kind-card')).find(b => b.textContent === label)!;
@@ -167,7 +189,7 @@ it('fills the morning meeting template and schedules a board for later', async (
   expect(host.querySelector('[aria-label="发布日期"]')).toBeNull();
 });
 it('builds a weekly schedule day by day and keeps it across tabs', async () => {
-  await click('课程表'); expect(host.querySelector('.day-tabs')).toBeNull();
+  await click('课表/值日'); expect(host.querySelector('.day-tabs')).toBeNull();
   await click('8-2'); expect(localStorage.getItem('broadcast-schedule-class')).toBe('8-2');
   const day = (label: string) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.day-tabs button')).find(b => b.textContent?.startsWith(label))!.click());
   await day('周一');
@@ -178,8 +200,15 @@ it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   expect(selects()).toEqual(['english', 'lunch']);
   await day('周二'); expect(selects()).toEqual([]); await click('体育 PE');
   expect(host.querySelector('.day-tabs')?.textContent).toContain('周一2 节');
-  await click('发布'); await click('课程表');
+  await click('发布'); await click('课表/值日');
   expect(host.querySelector('.day-tabs')?.textContent).toContain('周二1 节');
-  const save = Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('保存 8-2 课程表'));
-  expect(save?.disabled).toBe(true);
+  const save = () => Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('保存 8-2 课表/值日'))!;
+  expect(save().disabled).toBe(true);
+  await day('周二'); await click('添加一项');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 项值日"]')!, '白板');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="周二白板值日生"]')!, 'Penny');
+  await day('周三'); expect(host.querySelector<HTMLInputElement>('[aria-label="周三白板值日生"]')!.value).toBe('');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 项值日"]')!, '');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="周三第 1 项值日生"]')!, 'Eva');
+  expect(host.querySelector('.duty-task.invalid')).not.toBeNull();
 });

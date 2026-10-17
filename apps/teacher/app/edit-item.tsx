@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { NOTE_LIMIT, boardEntries, chars, countdownError, endError, endOfDay, localInput, todayAt, validBoard, validNote, type DisplayItem } from '@/lib/domain';
+import { NOTE_LIMIT, boardEntries, chars, countdownError, endError, endOfDay, localInput, todayAt, upcoming, validBoard, validNote, type DisplayItem } from '@/lib/domain';
 import { EndPicker, Option, TimeSelect } from './compose/fields';
 import { DateInput, EntryList } from './compose/forms';
 
@@ -21,6 +21,7 @@ export function EditItem({ item, now, ready, busy, onClose, onSave, onError }: {
   const [endAt, setEndAt] = useState(initialEnd);
   const [date, setDate] = useState(item.kind === 'countdown' ? item.content.date ?? '' : '');
   const timer = item.kind === 'countdown' && !item.content.date;
+  const start = upcoming(item, now) ? Date.parse(item.starts_at) : now;
   const until = endAt.slice(11);
 
   let hint = '', ok = true, content: object = {}, ends = '';
@@ -42,7 +43,7 @@ export function EditItem({ item, now, ready, busy, onClose, onSave, onError }: {
     hint = countdownError('days', 0, '', now, date);
     ends = date && new Date(`${date}T23:59:59`).toISOString();
   } else {
-    hint = endError(endAt, now);
+    hint = endError(endAt, now, start);
     ends = endAt === initialEnd ? item.ends_at : new Date(endAt).toISOString();
   }
 
@@ -67,7 +68,7 @@ export function EditItem({ item, now, ready, busy, onClose, onSave, onError }: {
           {item.kind === 'countdown' && !timer && <Option label="目标日期"><div className="choice-row">
             <DateInput value={date} now={now} onChange={setDate} />
           </div></Option>}
-          {item.kind !== 'countdown' && <EndPicker endAt={endAt} now={now} onChange={next => setEndAt(next || endOfDay(now))} />}
+          {item.kind !== 'countdown' && <EndPicker endAt={endAt} now={now} from={start} onChange={next => setEndAt(next || endOfDay(start))} />}
         </div>
         {hint && <p className="form-hint error-text">{hint}</p>}
         <div className="confirm-actions">

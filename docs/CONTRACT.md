@@ -1,6 +1,6 @@
 # API Contract
 
-All times are UTC ISO 8601 and all IDs are UUIDs. Broadcast text is limited to 300 Unicode code points. Admin status comes from Supabase Auth's `app_metadata.role=admin`. The device UID is `devices.id`, and the active binding is determined by `classrooms.device_id`.
+All times are UTC ISO 8601 and all IDs are UUIDs. Broadcast text is limited to 300 Unicode code points. Admin status comes from Supabase Auth's `app_metadata.role=admin`. The device UID is `devices.id`, and the active binding is determined by `classrooms.device_id`. Besides 8-1 to 8-6 there is a `Test` classroom for testing; the server treats it like any class (so up to 7 classes per request), and the teacher app hides it and everything sent only there from every account but the maintainer.
 
 ## Edge Function
 
@@ -24,7 +24,8 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
 | `ack_delivery` | `p_delivery`, `p_event`, `p_at`, nullable `p_error` | empty; this device's receipt, safe to retry |
 | `broadcast_history` | nullable `p_before`, nullable `p_id` | up to 20 broadcasts with nested `deliveries`; admin |
-| `create_display_item` | `p_request`, `p_kind`, `p_classrooms`, `p_content`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_duration_seconds` | the request ID; admin, idempotent per request |
+| `create_display_item` | `p_request`, `p_kind`, `p_classrooms`, `p_content`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_duration_seconds`, nullable `p_starts_at` | the request ID; admin, idempotent per request |
+| `copy_display_items` | `p_request`, `p_ids`, `p_classrooms`, `p_teacher_name` | empty; admin. Creates each given live item's request again (one per request, same kind, content, start and end) for the given classes; each copy's request ID is `md5(p_request ‖ source request)`, so a retry is idempotent |
 | `remove_display_item` | `p_id`, `p_all` (default false) | empty; admin. `p_all` removes the item from every class of the same request |
 | `remove_display_items` | `p_ids` | empty; admin. Removes the given items in one request |
 | `update_display_items` | `p_ids`, `p_content`, `p_ends_at` | empty; admin. Replaces the content and end of live items of one kind |
@@ -32,7 +33,7 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `delete_board_draft` | `p_id` | empty; admin. Deletes a draft or a scheduled board that has not appeared yet |
 | `display_overview` | none | `{server_now, items}`: every live or scheduled item in all classes; admin |
 | `display_state` | none | `{server_now, items, schedule, birthdays}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, its class's week (see Schedules) or null, and its class's birthday list or null |
-| `set_schedule` | `p_classroom`, `p_days`, `p_teacher_name` | empty; admin. Replaces the class's week |
+| `set_schedule` | `p_classroom`, `p_days`, `p_teacher_name`, nullable `p_duties` | empty; admin. Replaces the class's week, and its duty roster unless `p_duties` is null |
 | `set_birthdays` | `p_classroom`, `p_students`, `p_teacher_name` | empty; admin. Replaces the class's birthday list (see Birthdays) |
 
 `create_broadcast` is an admin RPC called by the teacher app with `p_id`, `p_body`, `p_classrooms`, `p_source`, `p_teacher_name`, `p_repeat_count` (0–4), `p_auto_close`, `p_emotion`, `p_voice_type`, `p_style` and `p_banner_position`. It validates every field, is idempotent per `p_id`, and writes the broadcast and all class deliveries in one transaction.
@@ -52,7 +53,7 @@ Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`,
 - note: `{text, color}`, with text 1–60 characters and color `yellow`, `blue`, `green` or `pink`.
 - countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false. A day count adds `date` (`YYYY-MM-DD`, `fullscreen` must be false): the device shows the calendar days left on its local date, "今天" on the day itself.
 
-Every item starts when it is created (`starts_at` is the server time), except a scheduled board; the end must fall in the future and within 400 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 12-hour limit, and never replaces anything: up to 3 day counts can be live per class (a fourth is refused), and a timed countdown replaces only another timed one. The device shows the day counts (soonest first) at the top right, above the timetable, in a desktop window that other windows can cover. Beside that column sit the newest timed countdown in its own topmost window and, below it, the notes (oldest first) in a desktop window that other windows can cover, starting a new column to the left when the screen height runs out. A note is refused when a target class already shows 12 notes. Device queries keep a countdown for 5 seconds past `ends_at`.
+Every item starts when it is created (`starts_at` is the server time), unless `p_starts_at` sets a later start (not for countdowns) or it is a scheduled board; the end must fall in the future and within 400 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 12-hour limit, and never replaces anything: up to 3 day counts can be live per class (a fourth is refused), and a timed countdown replaces only another timed one. The device shows the day counts (soonest first) at the top right, above the timetable, in a desktop window that other windows can cover. Beside that column sit the newest timed countdown in its own topmost window and, below it, the notes (oldest first) in a desktop window that other windows can cover, starting a new column to the left when the screen height runs out. A note is refused when 12 notes of a target class would overlap its time on screen. Device queries keep a countdown for 5 seconds past `ends_at`.
 
 ## Schedules
 
@@ -62,7 +63,9 @@ Every item starts when it is created (`starts_at` is the server time), except a 
 
 `update_display_items` changes live items in place, so the device keeps them by id. Timed countdowns keep the 12-hour limit.
 
-`schedules` holds one row per class: `classroom_id`, `days`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, from `english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
+`schedules` holds one row per class: `classroom_id`, `days`, `duties`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, from `english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
+
+`duties` is an array of up to 8 `{task, days}`: task 1–10 characters and `days` five name strings (Monday first, at most 40 characters, `''` for nobody). On a weekday by Asia/Shanghai time, `display_state` and `device_heartbeat` add one synthetic note to the items: id `md5(classroom ‖ date)`, `content` `{text, color: 'green'}` with one `task：names` line per job that has names that day, `teacher_name` `今日值日`, `starts_at` 2000-01-01 (so the device, which orders notes by start, puts it first) and `ends_at` the next midnight. It is not a `display_items` row, so it never counts toward the note limit or appears in `display_overview`.
 
 ### Birthdays
 

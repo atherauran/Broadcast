@@ -5,8 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_TEMPLATES, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  chars, daysUntil, fillTemplate, localDate, localInput, pastedLines, shiftDays, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
-import { Choices, DatePick, EmotionPicker, EndPicker, Option, TimeSelect, VoicePicker } from './fields';
+  chars, daysUntil, fillTemplate, localDate, localInput, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
+import { Choices, EmotionPicker, EndPicker, Option, PublishPicker, TimeSelect, VoicePicker } from './fields';
 import { blankBoard, type AlertDraft, type BannerDraft, type BoardDraft, type CountdownDraft, type NoteDraft } from './drafts';
 
 function Heading({ title, hint, length, limit, extra, action }: {
@@ -31,7 +31,7 @@ export function AlertForm({ draft, onChange, onError }: { draft: AlertDraft; onC
   }
   return <>
     <Heading title="广播内容" length={chars(draft.body)} limit={ALERT_LIMIT} />
-    <Textarea className="broadcast-input" aria-label="广播内容" placeholder="输入需要广播的内容…" value={draft.body} onChange={e => onChange({ body: e.target.value })} />
+    <Textarea className="broadcast-input short" aria-label="广播内容" placeholder="输入需要广播的内容…" value={draft.body} onChange={e => onChange({ body: e.target.value })} />
     <div className="template-row">
       {TEMPLATES.map(item => <button type="button" key={item.text} className="template-chip" onClick={() => pickTemplate(item.text)}>{item.label}</button>)}
     </div>
@@ -148,19 +148,10 @@ export function EntryList({ entries, onChange, onError }: { entries: string[]; o
   </>;
 }
 
-// Ten minutes ahead on the 5-minute grid, as a local "YYYY-MM-DDTHH:mm".
-const soonAt = (now: number) => localInput(Math.ceil((now + 600_000) / 300_000) * 300_000);
-
 export function BoardForm({ draft, now, onChange, onError }: {
   draft: BoardDraft; now: number; onChange: (change: Partial<BoardDraft>) => void; onError: (message: string) => void;
 }) {
   const start = draft.publishAt ? Date.parse(draft.publishAt) : now;
-  // A set end time moves with the publish day, so a template's 08:30 stays on the day the board appears.
-  function publishAt(next: string) {
-    const days = daysUntil(localDate(next ? Date.parse(next) : now), start);
-    onChange({ publishAt: next, endAt: draft.endAt && shiftDays(draft.endAt, days) });
-  }
-  const [publishDate, publishTime] = draft.publishAt.split('T');
   return <>
     <Heading title="公告内容" hint={draft.draftId ? '正在编辑已保存的公告' : '多行可直接粘贴'}
       extra={BOARD_TEMPLATES.map(item => <button type="button" key={item.label} className="template-chip"
@@ -175,15 +166,7 @@ export function BoardForm({ draft, now, onChange, onError }: {
       </div></Option>
       <Choices legend="升国旗" value={draft.flag ? 'on' : 'off'} options={[{ id: 'off', label: '不需要' }, { id: 'on', label: '显示升旗按钮' }]}
         onChange={value => onChange({ flag: value === 'on' })} />
-      <Option label="发布时间"><div className="choice-row">
-        <button type="button" className={draft.publishAt ? '' : 'active'} aria-pressed={!draft.publishAt} onClick={() => publishAt('')}>立即</button>
-        <button type="button" className={draft.publishAt ? 'active' : ''} aria-pressed={!!draft.publishAt}
-          onClick={() => !draft.publishAt && publishAt(soonAt(now))}>定时</button>
-        {draft.publishAt && <>
-          <DatePick value={publishDate} label="发布日期" now={now} min={localDate(now)} onChange={date => publishAt(`${date}T${publishTime}`)} />
-          <TimeSelect value={publishTime} label="发布时间" onChange={time => publishAt(`${publishDate}T${time}`)} />
-        </>}
-      </div></Option>
+      <PublishPicker publishAt={draft.publishAt} endAt={draft.endAt} now={now} onChange={onChange} />
       <EndPicker endAt={draft.endAt} now={now} from={start} onChange={endAt => onChange({ endAt })} />
     </div>
   </>;
@@ -199,7 +182,8 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
         {NOTE_COLORS.map(color => <button type="button" key={color.id} className={'color-choice note-' + color.id + (draft.color === color.id ? ' active' : '')}
           aria-pressed={draft.color === color.id} onClick={() => onChange({ color: color.id })}>{color.label}</button>)}
       </div></Option>
-      <EndPicker endAt={draft.endAt} now={now} onChange={endAt => onChange({ endAt })} />
+      <PublishPicker publishAt={draft.publishAt} endAt={draft.endAt} now={now} onChange={onChange} />
+      <EndPicker endAt={draft.endAt} now={now} from={draft.publishAt ? Date.parse(draft.publishAt) : now} onChange={endAt => onChange({ endAt })} />
     </div>
   </>;
 }
@@ -253,7 +237,7 @@ export function CountdownForm({ draft, now, onChange }: { draft: CountdownDraft;
     <Input className="title-input" aria-label="倒计时名称" placeholder={draft.mode === 'days' ? '名称，如“距离期末”' : '名称，如“距离下课”'} maxLength={20}
       value={draft.label} onChange={e => onChange({ label: e.target.value })} />
     <div className="broadcast-options">
-      <Choices legend="计时方式" value={draft.mode} options={[{ id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }, { id: 'days', label: '按天数' }]}
+      <Choices legend="计时方式" value={draft.mode} options={[{ id: 'days', label: '按天数' }, { id: 'duration', label: '按时长' }, { id: 'until', label: '到指定时间' }]}
         onChange={mode => onChange({ mode, until: draft.until || soonTime(now) })} />
       {draft.mode === 'duration' && <Option label="时长"><div className="choice-row">
         {COUNTDOWN_MINUTES.map(minutes => <button type="button" key={minutes} className={draft.minutes === minutes ? 'active' : ''}

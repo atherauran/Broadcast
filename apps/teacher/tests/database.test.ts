@@ -19,11 +19,11 @@ async function create(targets = ['8-1']) {
     [id, '请同学们回到教室。', targets, null, '王老师', 2, false, 'warning', 101013, 'fullscreen', 'top']);
   return id;
 }
-async function show(kind: string, content: object, targets = ['8-1'], extra: { end?: string; duration?: number } = {}) {
+async function show(kind: string, content: object, targets = ['8-1'], extra: { end?: string; duration?: number; start?: string } = {}) {
   const id = crypto.randomUUID();
   await identity(admin, 'admin');
-  await db.query('select create_display_item($1,$2,$3,$4,$5,$6::timestamptz,$7)', [id, kind, targets, JSON.stringify(content), '李老师',
-    extra.end ?? (extra.duration ? null : new Date(Date.now() + 3_600_000).toISOString()), extra.duration ?? null]);
+  await db.query('select create_display_item($1,$2,$3,$4,$5,$6::timestamptz,$7,$8::timestamptz)', [id, kind, targets, JSON.stringify(content), '李老师',
+    extra.end ?? (extra.duration ? null : new Date(Date.now() + 3_600_000).toISOString()), extra.duration ?? null, extra.start ?? null]);
   return id;
 }
 type Shown = { id: string; kind: string; content: Record<string, unknown>; starts_at: string };
@@ -52,7 +52,7 @@ beforeAll(async () => {
 });
 afterAll(async () => { await db?.close(); });
 describe('database contract and RLS (real PostgreSQL engine)', () => {
-  it('seeds exactly six classrooms', async () => { await identity(admin, 'admin'); expect(await scalar<number>('select count(*)::int from classrooms')).toBe(6); });
+  it('seeds the six classrooms and the hidden test one', async () => { await identity(admin, 'admin'); expect(await scalar<string[]>('select array_agg(id order by id) from classrooms')).toEqual(['8-1', '8-2', '8-3', '8-4', '8-5', '8-6', 'Test']); });
   it('rejects a second device competing for an occupied classroom', async () => { await identity(admin, 'admin'); await expect(db.query('select bind_device($1,$2,$3)', [third, '8-1', 'competitor'])).rejects.toThrow('已被其他设备绑定'); });
   it('prevents device users from changing bindings or sending broadcasts', async () => { await identity(first); await expect(db.query('select unbind_device($1)', ['8-2'])).rejects.toThrow('管理员'); await expect(db.query('select create_broadcast($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)', [crypto.randomUUID(), 'forged', ['8-2'], null, '伪造者', 1, true, 'normal', 101001, 'fullscreen', 'top'])).rejects.toThrow('管理员'); });
   it('only exposes the device own classroom and deliveries', async () => {
@@ -173,6 +173,33 @@ describe('display items', () => {
     await expect(show('note', { text: '第十三张', color: 'green' }, ['8-1', '8-2'])).rejects.toThrow('8-1 已有 12 张便签');
     await show('note', { text: '别的班', color: 'green' }, ['8-2']);
   });
+  it('schedules a note to appear later and counts only notes overlapping its time', async () => {
+    await clearDisplay(); const later = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+    await show('note', { text: '下午提醒', color: 'blue' }, ['8-1'], { start: later(60), end: later(120) });
+    const [item] = await screen(); expect(item.content.text).toBe('下午提醒'); expect(Date.parse(item.starts_at)).toBeGreaterThan(Date.now() + 3_500_000);
+    await expect(show('note', { text: '过去', color: 'blue' }, ['8-1'], { start: later(-1) })).rejects.toThrow('发布时间');
+    await expect(show('note', { text: '先结束', color: 'blue' }, ['8-1'], { start: later(90), end: later(80) })).rejects.toThrow('结束时间');
+    await expect(show('countdown', { label: '定时' }, ['8-1'], { start: later(10), end: later(20) })).rejects.toThrow('发布时间');
+    for (let i = 0; i < 12; i++) await show('note', { text: '便签' + i, color: 'green' }, ['8-1'], { end: later(50) });
+    await expect(show('note', { text: '重叠', color: 'green' }, ['8-1'], { start: later(40), end: later(65) })).rejects.toThrow('12 张');
+    await show('note', { text: '错开', color: 'green' }, ['8-1'], { start: later(55), end: later(70) });
+  });
+  it('copies what items show to other classes once per request, credited to the copying teacher', async () => {
+    await clearDisplay(); const later = new Date(Date.now() + 7_200_000).toISOString();
+    const shared = await show('board', board, ['8-1', '8-3'], { end: later }); await show('note', { text: '带伞', color: 'pink' });
+    await identity(admin, 'admin');
+    const ids = (await db.query<{ id: string }>('select id from display_items where removed_at is null')).rows.map(r => r.id);
+    const copy = (request: string, list = ids) => db.query('select copy_display_items($1,$2,$3,$4)', [request, list, ['8-2'], '周老师']);
+    const request = crypto.randomUUID(); await copy(request); await copy(request);
+    const copied = await screen(second);
+    expect(copied.map(i => i.kind).toSorted()).toEqual(['board', 'note']);
+    await identity(admin, 'admin');
+    const rows = (await db.query<{ teacher_name: string; ends_at: Date }>("select teacher_name, ends_at from display_items where classroom_id='8-2' and kind='board'")).rows;
+    expect(rows).toHaveLength(1); expect(rows[0].teacher_name).toBe('周老师'); expect(rows[0].ends_at.toISOString()).toBe(later);
+    await db.query('select remove_display_items($1)', [ids]);
+    await expect(copy(crypto.randomUUID())).rejects.toThrow('已结束');
+    const row = await rowId(shared); await identity(third); await expect(copy(crypto.randomUUID(), [row])).rejects.toThrow('管理员');
+  });
   it('keeps one countdown per class, computes its end on the server and lingers 5 seconds', async () => {
     await clearDisplay(); await show('countdown', { label: '午休' }, ['8-1', '8-2'], { duration: 1500 });
     const second = await show('countdown', { label: '考试' }, ['8-1'], { duration: 600 });
@@ -290,6 +317,24 @@ describe('board themes and schedules', () => {
     expect((await scalar<{ schedule: string[][] }>('select display_state()')).schedule).toEqual(week);
     await identity(second); expect((await scalar<{ schedule: string[][] | null }>('select display_state()')).schedule).toBeNull();
     expect(await scalar<number>('select count(*)::int from schedules')).toBe(0);
+  });
+  it('shows today\'s duty roster as the first note, and keeps the roster when saved without one', async () => {
+    const duties = [{ task: ' 白板 ', days: ['Sissie', 'Penny', 'Eva', 'Maya', 'Nicole'] }, { task: '扫地', days: ['Daniel', '', 'Milo', 'Alfred', 'Amy'] }];
+    await clearDisplay(); await show('note', { text: '老便签', color: 'yellow' });
+    await identity(admin, 'admin'); await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify(week), '赵老师', JSON.stringify(duties)]);
+    await save('8-1', week);
+    expect(await scalar('select duties from schedules where classroom_id=$1', ['8-1'])).toEqual([{ ...duties[0], task: '白板' }, duties[1]]);
+    const day = new Date(Date.now() + 8 * 3_600_000).getUTCDay() - 1;
+    const expected = day >= 0 && day < 5 ? [`白板：${duties[0].days[day]}`, duties[1].days[day] && `扫地：${duties[1].days[day]}`].filter(Boolean).join('\n') : null;
+    const notes = await screen(); const state = (await scalar<{ items: Shown[] }>('select display_state()')).items;
+    expect(notes.map(i => i.content.text)).toEqual(expected ? [expected, '老便签'] : ['老便签']);
+    expect(state.map(i => i.content.text)).toEqual(notes.map(i => i.content.text));
+    if (expected) expect(Date.parse(notes[0].starts_at)).toBeLessThan(Date.parse(notes[1].starts_at));
+    expect((await screen(second)).length).toBe(0);
+    await identity(admin, 'admin');
+    await expect(db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify(week), '赵老师', JSON.stringify([{ task: '', days: ['', '', '', '', ''] }])])).rejects.toThrow('任务');
+    await expect(db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify(week), '赵老师', JSON.stringify([{ task: '扫地', days: ['a'] }])])).rejects.toThrow('格式');
+    await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify(week), '赵老师', '[]']); await clearDisplay();
   });
   it('keeps a class birthday list that only its own class receives', async () => {
     const save = (classroom: string, students: unknown) => db.query('select set_birthdays($1,$2,$3)', [classroom, JSON.stringify(students), '赵老师']);

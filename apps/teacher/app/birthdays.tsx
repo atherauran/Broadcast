@@ -2,7 +2,7 @@ import { useState, type ClipboardEvent } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { BIRTHDAY_LIMIT, CLASSROOM_IDS, clockText, monthDays, pad, pastedBirthdays, type Birthday, type BirthdayList } from '@/lib/domain';
+import { BIRTHDAY_LIMIT, clockText, monthDays, pad, pastedBirthdays, type Birthday, type BirthdayList } from '@/lib/domain';
 import { birthdaysFromLines } from '@/lib/import';
 import { PhotoImport } from './photo-import';
 import { classKey } from './schedule';
@@ -17,8 +17,8 @@ const month = (row: BirthdayRow) => number(row.month, 12);
 const day = (row: BirthdayRow) => number(row.day, monthDays(month(row) || 1));
 
 // Unsaved lists live in the parent, so switching class or tab keeps them.
-export function BirthdayEditor({ lists, drafts, setDrafts, now, ready, busy, onSave, onError }: {
-  lists: BirthdayList[]; drafts: Record<string, BirthdayRow[]>; setDrafts: (update: (old: Record<string, BirthdayRow[]>) => Record<string, BirthdayRow[]>) => void;
+export function BirthdayEditor({ classes, lists, drafts, setDrafts, now, ready, busy, onSave, onError }: {
+  classes: string[]; lists: BirthdayList[]; drafts: Record<string, BirthdayRow[]>; setDrafts: (update: (old: Record<string, BirthdayRow[]>) => Record<string, BirthdayRow[]>) => void;
   now: number; ready: boolean; busy: string; onSave: (classroom: string, students: Birthday[]) => Promise<boolean>; onError: (message: string) => void;
 }) {
   const [classroom, setClassroom] = useState(() => localStorage.getItem(classKey) || '');
@@ -55,7 +55,7 @@ export function BirthdayEditor({ lists, drafts, setDrafts, now, ready, busy, onS
         {classroom && <span className="muted">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</span>}
       </div>
       <div className="choice-row schedule-classes">
-        {CLASSROOM_IDS.map(id => <button type="button" key={id} className={id === classroom ? 'active' : ''} aria-pressed={id === classroom} onClick={() => pick(id)}>{id}</button>)}
+        {classes.map(id => <button type="button" key={id} className={id === classroom ? 'active' : ''} aria-pressed={id === classroom} onClick={() => pick(id)}>{id}</button>)}
       </div>
     </section>
     {classroom && <section className="section composer">

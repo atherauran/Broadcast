@@ -19,8 +19,9 @@ export function draftCheck(kind: Kind, drafts: Drafts, now: number): { ok: boole
     return { ok: validBoard(b.title, b.entries) && !hint, hint };
   }
   if (kind === 'note') {
-    const hint = endError(drafts.note.endAt, now);
-    return { ok: validNote(drafts.note.text) && !hint, hint };
+    const n = drafts.note;
+    const hint = publishError(n.publishAt, now) || endError(n.endAt, now, n.publishAt ? Date.parse(n.publishAt) : now);
+    return { ok: validNote(n.text) && !hint, hint };
   }
   const c = drafts.countdown;
   const hint = countdownError(c.mode, c.minutes, c.until, now, c.date);
@@ -35,7 +36,7 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
   saved: SavedBoard[]; onSaveDraft: () => void; onOpenSaved: (board: SavedBoard) => void; onDeleteSaved: (id: string) => void;
 }) {
   const check = draftCheck(kind, drafts, now);
-  const action = kind === 'board' && drafts.board.publishAt ? '定时发布' : actions[kind];
+  const action = (kind === 'board' && drafts.board.publishAt) || (kind === 'note' && drafts.note.publishAt) ? '定时发布' : actions[kind];
   return <>
     <section className="section"><div className="kind-picker" aria-label="发布方式">{KINDS.map(item => {
       const Icon = icons[item.id];

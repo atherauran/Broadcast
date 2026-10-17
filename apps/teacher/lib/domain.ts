@@ -1,4 +1,6 @@
 export const CLASSROOM_IDS = ['8-1', '8-2', '8-3', '8-4', '8-5', '8-6'];
+// A class for the maintainer's test PC, hidden from every other account.
+export const TEST_CLASSROOM = 'Test';
 export type Emotion = 'normal' | 'happy' | 'sad' | 'angry' | 'warning';
 export const EMOTIONS: { id: Emotion; label: string; emoji: string }[] = [
   { id: 'normal', label: '普通', emoji: '' },
@@ -261,11 +263,19 @@ export const DAY_PERIODS = 12;
 // Monday to Friday, each an ordered list of subject ids.
 export type Week = string[][];
 export const emptyWeek = (): Week => SCHOOL_DAYS.map(() => []);
-export interface Schedule { classroom_id: string; days: Week; teacher_name: string; updated_at: string }
+// One duty job and who does it Monday to Friday ('' when nobody); the classroom shows the day's jobs as the first note.
+export interface Duty { task: string; days: string[] }
+export const DUTY_LIMIT = 8;
+// What the 课表/值日 tab edits for one class.
+export type Timetable = { days: Week; duties: Duty[] };
+export interface Schedule { classroom_id: string; days: Week; duties: Duty[]; teacher_name: string; updated_at: string }
 export function patchSchedule(schedules: Schedule[], row: Schedule): Schedule[] {
-  const { classroom_id, days, teacher_name, updated_at } = row;
-  return [...schedules.filter(item => item.classroom_id !== classroom_id), { classroom_id, days, teacher_name, updated_at }];
+  const { classroom_id, days, duties, teacher_name, updated_at } = row;
+  return [...schedules.filter(item => item.classroom_id !== classroom_id), { classroom_id, days, duties, teacher_name, updated_at }];
 }
+// Jobs as saved: trimmed, and blank rows dropped.
+export const dutyRows = (duties: Duty[]): Duty[] => duties.map(duty => ({ task: duty.task.trim(), days: duty.days.map(name => name.trim()) }))
+  .filter(duty => duty.task || duty.days.some(Boolean));
 
 // A class's birthdays as "MM-DD" without the year; the classroom greets them on the day, weekend ones on Friday.
 export interface Birthday { name: string; date: string }

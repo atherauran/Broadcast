@@ -5,9 +5,9 @@ import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, LogOut, MessageSq
 import { Button } from '@/components/ui/button';
 import { registerBroadcastTools } from '@/lib/webmcp';
 import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getHistory, getOverview, getSchedules, maintainerEmail, once, rpc, supabase } from '@/lib/api';
-import { CLASSROOM_IDS, boardEntries, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
-  type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Week } from '@/lib/domain';
+  type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Timetable } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
 import { blankBoard, initialDrafts, type Drafts, type Patch } from './compose/drafts';
@@ -46,7 +46,7 @@ export default function App() {
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [birthdays, setBirthdays] = useState<BirthdayList[]>([]);
   const [birthdayDrafts, setBirthdayDrafts] = useState<Record<string, BirthdayRow[]>>({});
-  const [weekDrafts, setWeekDrafts] = useState<Record<string, Week>>({});
+  const [weekDrafts, setWeekDrafts] = useState<Record<string, Timetable>>({});
   const [feedback, setFeedback] = useState<Feedback[] | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState<{ focus: string | null } | null>(null);
   const [seenMap, setSeenMap] = useState(readSeen);
@@ -268,8 +268,12 @@ export default function App() {
         }
         patch('board', blankBoard());
       } else if (kind === 'note') {
-        await createDisplay('note', { text: drafts.note.text.trim(), color: drafts.note.color }, { p_ends_at: endsAt(drafts.note.endAt, now) });
-        patch('note', { text: '' });
+        const n = drafts.note;
+        const start = n.publishAt ? Date.parse(n.publishAt) : now;
+        await createDisplay('note', { text: n.text.trim(), color: n.color },
+          { p_ends_at: endsAt(n.endAt, start), p_starts_at: n.publishAt ? new Date(start).toISOString() : null });
+        // An end set for a scheduled day does not carry over to the next note.
+        patch('note', n.publishAt ? { text: '', publishAt: '', endAt: '' } : { text: '' });
       } else {
         const c = drafts.countdown;
         if (c.mode === 'days') await createDisplay('countdown', { label: c.label.trim(), fullscreen: false, date: c.date }, { p_ends_at: new Date(`${c.date}T23:59:59`).toISOString() });
@@ -320,7 +324,15 @@ export default function App() {
 
   const known = configured && !!session && live && network;
   const ready = configured && !!session && network && validTeacherName(teacherName);
-  const latest = history.find(b => b.id === latestId);
+  // The test class, and what was sent only there, exist for the maintainer alone.
+  const shown = (id: string) => maintainer || id !== TEST_CLASSROOM;
+  const visibleRooms = rooms.filter(room => shown(room.id));
+  const classIds = visibleRooms.map(room => room.id);
+  const visibleOverview = overview.filter(item => shown(item.classroom_id));
+  const visibleDrafts = boardDrafts.filter(draft => !draft.classrooms.length || draft.classrooms.some(shown));
+  const visibleHistory = maintainer ? history
+    : history.map(item => ({ ...item, deliveries: item.deliveries.filter(d => shown(d.classroom_id)) })).filter(item => item.deliveries.length);
+  const latest = visibleHistory.find(b => b.id === latestId);
   useEffect(() => registerBroadcastTools(
     () => ({ connected: known, classrooms: rooms.map(room => ({ id: room.id, online: known ? isOnline(room, serverNow()) : null })) }),
     (text, targets) => { patch('alert', { body: text, sourceId: null }); setSelected(targets); setKind('alert'); setTab('send'); },
@@ -349,7 +361,7 @@ export default function App() {
         <button className={tab === 'send' ? 'active' : ''} onClick={() => setTab('send')}><AudioLines size={19} />发布</button>
         <button className={tab === 'screen' ? 'active' : ''} onClick={() => setTab('screen')}><MonitorPlay size={18} />正在显示</button>
         <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><Clock3 size={18} />广播历史</button>
-        <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}><CalendarDays size={18} />课程表</button>
+        <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}><CalendarDays size={18} />课表/值日</button>
         <button className={tab === 'birthdays' ? 'active' : ''} onClick={() => setTab('birthdays')}><Cake size={18} />生日</button>
       </nav>
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
@@ -357,39 +369,44 @@ export default function App() {
       {error && <div className="feedback error" role="alert">{error}<button aria-label="关闭提示" onClick={() => setError('')}><X size={17} /></button></div>}
       {sw.needRefresh[0] && <div className="feedback info">有新版本可用<Button variant="link" onClick={() => void sw.updateServiceWorker(true)} disabled={!!busy}>更新应用</Button></div>}
       {tab === 'send' && <>
-        <Compose kind={kind} setKind={setKind} rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected}
+        <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
-          saved={savedBoards(boardDrafts, overview, now)} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
+          saved={savedBoards(visibleDrafts, visibleOverview, now)} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
         {latest && <section className="section delivery-panel" aria-live="polite">
           <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
           <p className="broadcast-body">{latest.body}</p>
           <p className="broadcast-meta">{broadcastMeta(latest)}</p>
-          <Receipts item={latest} rooms={rooms} known={known} now={now} />
+          <Receipts item={latest} rooms={visibleRooms} known={known} now={now} />
         </section>}
-        {!latest && history.length > 0 && <button className="recent-link" onClick={() => { setTab('history'); setExpanded(history[0].id); }}>
-          <span><span className="muted">最近广播 · {time(history[0].created_at)}</span><span className="recent-body">{history[0].body}</span></span>
+        {!latest && visibleHistory.length > 0 && <button className="recent-link" onClick={() => { setTab('history'); setExpanded(visibleHistory[0].id); }}>
+          <span><span className="muted">最近广播 · {time(visibleHistory[0].created_at)}</span><span className="recent-body">{visibleHistory[0].body}</span></span>
           <ArrowUpRight size={20} />
         </button>}
       </>}
-      {tab === 'screen' && <OnScreen items={overview} rooms={rooms} known={known} now={now} ready={ready} busy={busy}
+      {tab === 'screen' && <OnScreen items={visibleOverview} rooms={visibleRooms} classes={classIds} known={known} now={now} ready={ready} busy={busy}
         onRemove={ids => run('remove', async () => { await rpc('remove_display_items', { p_ids: ids }); if (!live) await refreshOverview(); })}
         onEdit={(ids, content, ends) => run('edit', async () => {
           await rpc('update_display_items', { p_ids: ids, p_content: content, p_ends_at: ends }); if (!live) await refreshOverview();
+        })}
+        onCopy={(ids, classrooms) => run('copy', async () => {
+          await once('copy-attempt', [ids, classrooms, teacherName], id =>
+            rpc('copy_display_items', { p_request: id, p_ids: ids, p_classrooms: classrooms, p_teacher_name: teacherName }));
+          if (!live) await refreshOverview();
         })} onError={setError} />}
-      {tab === 'history' && <History history={history} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
+      {tab === 'history' && <History history={visibleHistory} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
-        onResend={resend} rooms={rooms} known={known} now={now} configured={configured} />}
-      {tab === 'schedule' && <ScheduleEditor schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
-        onSave={(classroom, days) => run('schedule', async () => {
-          await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_teacher_name: teacherName });
-          setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
+        onResend={resend} rooms={visibleRooms} known={known} now={now} configured={configured} />}
+      {tab === 'schedule' && <ScheduleEditor classes={classIds} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
+        onSave={(classroom, { days, duties }) => run('schedule', async () => {
+          await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
+          setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
         })} />}
-      {tab === 'birthdays' && <BirthdayEditor lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
+      {tab === 'birthdays' && <BirthdayEditor classes={classIds} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
         onError={setError} onSave={(classroom, students) => run('birthdays', async () => {
           await rpc('set_birthdays', { p_classroom: classroom, p_students: students, p_teacher_name: teacherName });
           setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
         })} />}
-      {tab === 'devices' && <Devices rooms={rooms} ready={ready} busy={busy} onBack={() => setTab('send')}
+      {tab === 'devices' && <Devices rooms={visibleRooms} ready={ready} busy={busy} onBack={() => setTab('send')}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })} />}
     </main>
     {feedbackOpen && <FeedbackDialog items={feedback ?? []} maintainer={maintainer} focus={feedbackOpen.focus} onClose={closeFeedback}
