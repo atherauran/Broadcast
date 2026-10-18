@@ -4,7 +4,8 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import App from '../app/page';
 import { OnScreen } from '../app/on-screen';
-import { CLASSROOM_IDS, type Classroom, type DisplayItem } from '../lib/domain';
+import { SavedBoards } from '../app/compose/saved-boards';
+import { CLASSROOM_IDS, type Classroom, type DisplayItem, type SavedBoard } from '../lib/domain';
 
 let root: Root;
 let host: HTMLDivElement;
@@ -187,6 +188,18 @@ it('fills the morning meeting template and schedules a board for later', async (
   expect(Array.from(host.querySelectorAll('button')).some(b => b.textContent?.trim() === '存草稿')).toBe(true);
   await click('立即');
   expect(host.querySelector('[aria-label="发布日期"]')).toBeNull();
+});
+it('lists a teacher\'s own saved boards and folds the other teachers\' ones', async () => {
+  const board = (id: string, teacher_name: string): SavedBoard => ({ id, content: { title: id, entries: ['升旗'], speak: false, voice_type: 101001 },
+    classrooms: ['8-4'], ends_at: null, publish_at: null, teacher_name, updated_at: '2026-10-18T00:00:00Z' });
+  const onDelete = vi.fn();
+  await act(async () => root.render(createElement(SavedBoards, { boards: [board('mine', '王老师'), board('a', '李老师'), board('b', '张老师')],
+    teacher: '王老师', editing: null, now: Date.now(), ready: true, busy: '', onOpen: vi.fn(), onDelete })));
+  const titles = () => Array.from(host.querySelectorAll('.screen-summary')).map(e => e.textContent!.split(' · ')[0]);
+  expect(titles()).toEqual(['mine']);
+  await click('其他老师的 2 条'); expect(titles()).toEqual(['mine', 'a', 'b']);
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('[aria-label="删除"]')[2].click());
+  expect(onDelete).toHaveBeenCalledWith('b');
 });
 it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   await click('课表/值日'); expect(host.querySelector('.day-tabs')).toBeNull();

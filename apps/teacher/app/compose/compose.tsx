@@ -29,11 +29,11 @@ export function draftCheck(kind: Kind, drafts: Drafts, now: number): { ok: boole
 }
 
 export function Compose({ kind, setKind, rooms, known, now, selected, setSelected, drafts, patch, ready, busy, onSubmit, onError,
-  saved, onSaveDraft, onOpenSaved, onDeleteSaved }: {
+  saved, teacherName, onSaveDraft, onOpenSaved, onDeleteSaved }: {
   kind: Kind; setKind: (kind: Kind) => void; rooms: Classroom[]; known: boolean; now: number;
   selected: string[]; setSelected: (update: (old: string[]) => string[]) => void;
   drafts: Drafts; patch: Patch; ready: boolean; busy: string; onSubmit: () => void; onError: (message: string) => void;
-  saved: SavedBoard[]; onSaveDraft: () => void; onOpenSaved: (board: SavedBoard) => void; onDeleteSaved: (id: string) => void;
+  saved: SavedBoard[]; teacherName: string; onSaveDraft: () => void; onOpenSaved: (board: SavedBoard) => void; onDeleteSaved: (id: string) => void;
 }) {
   const check = draftCheck(kind, drafts, now);
   const action = (kind === 'board' && drafts.board.publishAt) || (kind === 'note' && drafts.note.publishAt) ? '定时发布' : actions[kind];
@@ -62,7 +62,7 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
         </div>
       </div>
     </section>
-    {kind === 'board' && saved.length > 0 && <SavedBoards boards={saved} editing={drafts.board.draftId} now={now} ready={ready} busy={busy}
+    {kind === 'board' && saved.length > 0 && <SavedBoards boards={saved} teacher={teacherName} editing={drafts.board.draftId} now={now} ready={ready} busy={busy}
       onOpen={onOpenSaved} onDelete={onDeleteSaved} />}
   </>;
 }
