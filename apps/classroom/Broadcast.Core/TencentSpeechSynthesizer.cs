@@ -110,6 +110,7 @@ public sealed class TencentSpeechSynthesizer(TencentTtsConfig config, ServerCloc
         }
         if (format is null || data.Count == 0) throw new InvalidOperationException("音频内容为空");
         if (format.Length < 12) throw new InvalidOperationException("音频格式无效");
+        Louden(format, data);
         var leadIn = WakeSound(format);
         if (leadIn.Length == 0) throw new InvalidOperationException("音频格式无效");
         data.Insert(0, leadIn);
@@ -127,6 +128,22 @@ public sealed class TencentSpeechSynthesizer(TencentTtsConfig config, ServerCloc
         var destination = 28 + formatLength;
         foreach (var chunk in data) { chunk.CopyTo(result, destination); destination += chunk.Length; }
         return result;
+    }
+
+    // Tencent's normal volume comes out about 10 dB below the anthem, so quiet speech is raised until its loudest moment
+    // reaches SpeechPeak (about -3 dBFS, roughly the anthem's loudness); speech already that loud is left alone.
+    private const double SpeechPeak = .7;
+    private static void Louden(byte[] format, List<byte[]> data)
+    {
+        if (BinaryPrimitives.ReadUInt16LittleEndian(format.AsSpan(14, 2)) != 16) return;
+        var peak = 0;
+        foreach (var chunk in data)
+            for (var i = 0; i + 1 < chunk.Length; i += 2) peak = Math.Max(peak, Math.Abs((int)BinaryPrimitives.ReadInt16LittleEndian(chunk.AsSpan(i, 2))));
+        var gain = SpeechPeak * short.MaxValue / Math.Max(peak, 1);
+        if (gain <= 1) return;
+        foreach (var chunk in data)
+            for (var i = 0; i + 1 < chunk.Length; i += 2)
+                BinaryPrimitives.WriteInt16LittleEndian(chunk.AsSpan(i, 2), (short)Math.Round(BinaryPrimitives.ReadInt16LittleEndian(chunk.AsSpan(i, 2)) * gain));
     }
 
     // A sleeping speaker, HDMI or Bluetooth output needs real signal to wake up; digital silence does not always do it.
