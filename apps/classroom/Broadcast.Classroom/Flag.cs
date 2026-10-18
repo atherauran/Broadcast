@@ -56,7 +56,13 @@ internal sealed class FlagIcon : Control
 // The flag filling the screen, waving from its hoist edge.
 internal sealed class FlagScene : Scene
 {
+    // The shade's strongest alpha is .16 × 255 ≈ 41, so one brush per alpha step looks the same as an exact one and none is made per frame.
+    private const int ShadeSteps = 41;
+    private static readonly IBrush[] Light = Shades(Colors.White), Dark = Shades(Colors.Black);
     private RenderTargetBitmap? _flag;
+
+    private static IBrush[] Shades(Color color) =>
+        Enumerable.Range(0, ShadeSteps + 1).Select(i => (IBrush)new SolidColorBrush(color, i * .16 / ShadeSteps).ToImmutable()).ToArray();
 
     public FlagScene() { SizeChanged += (_, _) => { _flag?.Dispose(); _flag = null; }; }
 
@@ -84,7 +90,7 @@ internal sealed class FlagScene : Scene
             var dest = new Rect(left + x, top + fh * .04 * u * Math.Sin(phase), width + .6, fh);
             context.DrawImage(_flag, new Rect(x * pixels, 0, width * pixels, _flag.PixelSize.Height), dest);
             var slope = Math.Cos(phase) * (.3 + .7 * u);
-            context.FillRectangle(new SolidColorBrush(slope > 0 ? Colors.White : Colors.Black, Math.Abs(slope) * .16), dest);
+            context.FillRectangle((slope > 0 ? Light : Dark)[(int)Math.Round(Math.Abs(slope) * ShadeSteps)], dest);
         }
     }
 }

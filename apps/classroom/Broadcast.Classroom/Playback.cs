@@ -32,7 +32,7 @@ internal sealed class PlaybackWindow : ClassroomWindow
     {
         _audio = audio; Scene = scene;
         using (var stream = AssetLoader.Open(new Uri($"avares://{typeof(PlaybackWindow).Assembly.GetName().Name}/Assets/{sound}")))
-        using (var copy = new MemoryStream()) { stream.CopyTo(copy); _sound = copy.ToArray(); }
+        { _sound = new byte[stream.Length]; stream.ReadExactly(_sound); }
         SystemDecorations = SystemDecorations.None; WindowState = WindowState.FullScreen;
         Topmost = true; ShowInTaskbar = false; CanResize = false; Background = Night;
         // No button covers the picture: a tap anywhere or Esc ends it early.
