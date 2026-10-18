@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_TEMPLATES, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  chars, daysUntil, fillTemplate, localDate, localInput, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
+  chars, daysUntil, fillTemplate, localInput, nextAt, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
 import { Choices, EmotionPicker, EndPicker, Option, PublishPicker, TimeSelect, VoicePicker } from './fields';
 import { blankBoard, type AlertDraft, type BannerDraft, type BoardDraft, type CountdownDraft, type NoteDraft } from './drafts';
 
@@ -155,7 +155,7 @@ export function BoardForm({ draft, now, onChange, onError }: {
   return <>
     <Heading title="公告内容" hint={draft.draftId ? '正在编辑已保存的公告' : '多行可直接粘贴'}
       extra={BOARD_TEMPLATES.map(item => <button type="button" key={item.label} className="template-chip"
-        onClick={() => onChange({ title: item.title, endAt: `${localDate(start)}T${item.end}` })}>{item.label}</button>)}
+        onClick={() => onChange({ title: item.title, endAt: nextAt(start, item.end) })}>{item.label}</button>)}
       action={draft.draftId && <Button type="button" variant="link" className="heading-action" onClick={() => onChange(blankBoard())}>取消编辑</Button>} />
     <Input className="title-input" aria-label="公告标题" placeholder="标题（默认为“公告”）" maxLength={30} value={draft.title} onChange={e => onChange({ title: e.target.value })} />
     <EntryList entries={draft.entries} onChange={entries => onChange({ entries })} onError={onError} />

@@ -17,6 +17,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Duplicate notifications and restart do not replay", Duplicates),
     ("Uncommitted claim failure retries on next sync", Retry),
     ("Receipts survive restart and flush idempotently", Persistence),
+    ("A rejected receipt is dropped, a throttled one retries", RejectedReceipt),
     ("Failed display emits a failure receipt", DisplayFailure),
     ("A banner shows text only and does not delay a fullscreen broadcast", BannerBesideAlert),
     ("A newer banner replaces the current one", BannerReplace),
@@ -221,6 +222,16 @@ static async Task Persistence()
     var recovered = new ReceiptOutbox(h.Path); await recovered.FlushAsync(h.Backend, default); await recovered.FlushAsync(h.Backend, default);
     Check(h.Backend.Receipts.Count == 1);
 }
+static async Task RejectedReceipt()
+{
+    await using var h = new Harness(); var rejected = new Receipt(Guid.NewGuid(), "received", DateTimeOffset.UtcNow);
+    h.Outbox.Enqueue(rejected); h.Outbox.Enqueue(new Receipt(Guid.NewGuid(), "received", DateTimeOffset.UtcNow));
+    h.Backend.Reject[rejected.DeliveryId] = System.Net.HttpStatusCode.TooManyRequests;
+    try { await h.Outbox.FlushAsync(h.Backend, default); throw new Exception("Throttled receipt was dropped"); } catch (BackendException) { }
+    h.Backend.Reject[rejected.DeliveryId] = System.Net.HttpStatusCode.BadRequest;
+    await h.Outbox.FlushAsync(h.Backend, default); await new ReceiptOutbox(h.Path).FlushAsync(h.Backend, default);
+    Check(h.Backend.Receipts.Count == 1 && h.Backend.Receipts.Single().DeliveryId != rejected.DeliveryId);
+}
 static async Task DisplayFailure()
 {
     await using var h = new Harness(); h.Display.Fail = true; h.Backend.Items = [h.Item("oops")];
@@ -358,12 +369,13 @@ sealed class Harness : IAsyncDisposable
 }
 sealed class FakeBackend : IBackend
 {
-    public Delivery[] Items = []; public bool FailClaim;
+    public Delivery[] Items = []; public bool FailClaim; public readonly ConcurrentDictionary<Guid, System.Net.HttpStatusCode> Reject = [];
     public readonly ConcurrentDictionary<Guid, byte> Claims = []; public readonly ConcurrentQueue<Receipt> Receipts = [];
     public Task<PendingBatch> PendingAsync(CancellationToken ct) => Task.FromResult(new PendingBatch(DateTimeOffset.UtcNow, Items));
     public Task<bool> ClaimAsync(Guid id, CancellationToken ct)
     { if (FailClaim) { FailClaim = false; throw new IOException("offline"); } return Task.FromResult(Claims.TryAdd(id, 0)); }
-    public Task AcknowledgeAsync(Receipt r, CancellationToken ct) { Receipts.Enqueue(r); return Task.CompletedTask; }
+    public Task AcknowledgeAsync(Receipt r, CancellationToken ct)
+    { if (Reject.TryGetValue(r.DeliveryId, out var status)) throw new BackendException("回执时间无效", status); Receipts.Enqueue(r); return Task.CompletedTask; }
 }
 sealed class FakeDisplay : IDisplay
 {

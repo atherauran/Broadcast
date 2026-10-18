@@ -36,8 +36,8 @@ public sealed class ReceiptOutbox
                 lock (_lock) receipt = _pending.FirstOrDefault();
                 if (receipt is null) return;
                 try { await backend.AcknowledgeAsync(receipt, ct); }
-                catch (BackendException e) when (e.Status == System.Net.HttpStatusCode.Forbidden || e.Message.Contains("无权提交"))
-                { /* A revoked binding cannot submit retained receipts. */ }
+                // A rejected receipt (a revoked binding, an invalid time) would otherwise block every later one; auth, timeouts and throttling retry.
+                catch (BackendException e) when ((int)e.Status is >= 400 and < 500 and not (401 or 408 or 429)) { }
                 lock (_lock) { _pending.Remove(receipt); Save(); }
             }
         }

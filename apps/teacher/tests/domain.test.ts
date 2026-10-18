@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -39,6 +39,7 @@ describe('display styles', () => {
   it('defaults the end time to the end of the local day', () => {
     expect(localInput(local)).toBe('2026-10-04T14:03'); expect(endOfDay(local)).toBe('2026-10-04T23:59');
     expect(shiftDays('2026-10-31T08:30', 1)).toBe('2026-11-01T08:30');
+    expect(nextAt(local, '15:40')).toBe('2026-10-04T15:40'); expect(nextAt(local, '08:30')).toBe('2026-10-05T08:30');
     expect(todayAt(local, '15:40')).toBe(new Date(2026, 9, 4, 15, 40).getTime()); expect(soonTime(local)).toBe('14:15');
   });
   it('explains impossible times', () => {

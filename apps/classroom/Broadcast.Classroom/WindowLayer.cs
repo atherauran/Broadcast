@@ -6,7 +6,7 @@ namespace Broadcast.Classroom;
 // Display items must not take focus from the lesson: an activated window would swallow the PPT clicker keys.
 internal static class WindowLayer
 {
-    private const uint NoSize = 0x1, NoMove = 0x2, NoActivate = 0x10;
+    private const uint NoSize = 0x1, NoMove = 0x2, NoActivate = 0x10, CloseCommand = 0xF060, Grayed = 0x1;
 
     // Classroom users cannot close these windows, but they must not hold up Windows shutdown or the app's own exit.
     public static void KeepOpen(WindowClosingEventArgs e, bool dismissed)
@@ -36,6 +36,13 @@ internal static class WindowLayer
             SetWindowPos(handle, target, 0, 0, 0, 0, NoSize | NoMove | NoActivate);
     }
 
+    // A title bar the classroom can see should not offer a close button that does nothing.
+    public static void DisableClose(Window window)
+    {
+        if (OperatingSystem.IsWindows() && Handle(window) is { } handle)
+            EnableMenuItem(GetSystemMenu(handle, false), CloseCommand, Grayed);
+    }
+
     private static IntPtr? Handle(Window window) => window.TryGetPlatformHandle()?.Handle;
 
     // QUNS_BUSY, QUNS_RUNNING_D3D_FULL_SCREEN and QUNS_PRESENTATION_MODE.
@@ -44,5 +51,7 @@ internal static class WindowLayer
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] private static extern IntPtr GetSystemMenu(IntPtr window, [MarshalAs(UnmanagedType.Bool)] bool revert);
+    [DllImport("user32.dll")] private static extern int EnableMenuItem(IntPtr menu, uint item, uint flags);
     [DllImport("shell32.dll")] private static extern int SHQueryUserNotificationState(out int state);
 }

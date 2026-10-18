@@ -207,6 +207,8 @@ export function todayAt(now: number, time: string): number {
   const d = new Date(now); d.setHours(hours, minutes, 0, 0);
   return d.getTime();
 }
+// The next "HH:mm" after from, today or tomorrow, as a local input value.
+export const nextAt = (from: number, time: string) => shiftDays(`${localDate(from)}T${time}`, todayAt(from, time) > from ? 0 : 1);
 // End dates can be picked up to this many days ahead.
 export const END_DAYS = 365;
 // An empty endAt means the end of the day the item starts, which is today unless it is scheduled.

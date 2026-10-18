@@ -371,7 +371,7 @@ export default function App() {
       {tab === 'send' && <>
         <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
-          saved={savedBoards(visibleDrafts, visibleOverview, now)} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
+          saved={savedBoards(visibleDrafts, visibleOverview, now).filter(board => board.teacher_name === teacherName)} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
         {latest && <section className="section delivery-panel" aria-live="polite">
           <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
           <p className="broadcast-body">{latest.body}</p>

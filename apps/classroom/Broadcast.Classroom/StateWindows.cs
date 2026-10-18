@@ -142,6 +142,7 @@ internal sealed class BoardWindow : StateWindow
         };
         Content = new Panel { Children = { _backdrop, scroller, actions } };
         SizeChanged += (_, _) => Fit();
+        Opened += (_, _) => WindowLayer.DisableClose(this);
     }
 
     // White with colored text and outline, so a colored icon stands out on every background; it keeps these colors when hovered or pressed.
