@@ -51,6 +51,7 @@ beforeAll(async () => {
   await db.query('select bind_device($1,$2,$3)', [second, '8-2', 'classroom-two']);
 });
 afterAll(async () => { await db?.close(); });
+
 describe('database contract and RLS (real PostgreSQL engine)', () => {
   it('seeds the six classrooms and the hidden test one', async () => { await identity(admin, 'admin'); expect(await scalar<string[]>('select array_agg(id order by id) from classrooms')).toEqual(['8-1', '8-2', '8-3', '8-4', '8-5', '8-6', 'Test']); });
   it('rejects a second device competing for an occupied classroom', async () => { await identity(admin, 'admin'); await expect(db.query('select bind_device($1,$2,$3)', [third, '8-1', 'competitor'])).rejects.toThrow('已被其他设备绑定'); });
@@ -382,5 +383,48 @@ describe('board themes and schedules', () => {
     await expect(save('8-9', week)).rejects.toThrow('班级');
     await identity(first); await expect(save('8-3', week)).rejects.toThrow('管理员');
     await expect(db.query("update schedules set days='[]'")).rejects.toThrow('permission denied');
+  });
+});
+
+describe('long notes, font sizes and hidden desktops', () => {
+  it('accepts 300-character notes with a font size of 18–28, defaulting to 20', async () => {
+    await clearDisplay();
+    await show('note', { text: '😀'.repeat(300), color: 'yellow', font_size: 28 });
+    await show('note', { text: '旧版便签', color: 'blue' });
+    const items = await screen();
+    expect(items.find(item => item.content.text === '旧版便签')?.content.font_size).toBe(20);
+    expect(items.find(item => item.content.font_size === 28)?.content.text).toBe('😀'.repeat(300));
+    await expect(show('note', { text: '字'.repeat(301), color: 'yellow' })).rejects.toThrow('300');
+    for (const size of [17, 29, 20.5, '20', null]) await expect(show('note', { text: 'bad', color: 'yellow', font_size: size })).rejects.toThrow('字号');
+  });
+  it('marks the duty roster and puts it first', async () => {
+    await clearDisplay(); await show('note', { text: '普通便签', color: 'green' });
+    await identity(admin, 'admin');
+    await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify([[], [], [], [], []]), '老师', JSON.stringify([{ task: '白板', days: ['A', 'B', 'C', 'D', 'E'] }])]);
+    const weekday = await scalar<boolean>("select extract(isodow from (clock_timestamp() at time zone 'Asia/Shanghai')::date) between 1 and 5");
+    const items = await screen();
+    if (weekday) expect(items[0]).toMatchObject({ teacher_name: '今日值日', content: { duty: true, color: 'green' } });
+    expect(items.find(item => item.content.text === '普通便签')?.content.duty).toBeUndefined();
+  });
+  it('clears a hidden classroom desktop and restores it unchanged; only admins can switch it', async () => {
+    await clearDisplay(); await show('note', { text: '隐藏后仍保留', color: 'pink' }, ['8-1', '8-2']);
+    await identity(admin, 'admin');
+    await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify([['math'], ['math'], ['math'], ['math'], ['math']]), '老师', null]);
+    await db.query('select set_screen_hidden($1,true)', ['8-1']);
+    expect(await scalar<Array<{ id: string; screen_hidden: boolean }>>("select classroom_status()->'classrooms'")).toContainEqual(expect.objectContaining({ id: '8-1', screen_hidden: true }));
+    await identity(third);
+    expect(await scalar('select display_state()')).toMatchObject({ items: [], schedule: null, birthdays: null });
+    expect(await scalar('select device_heartbeat(true)')).toMatchObject({ active: true, display: [], schedule: null, birthdays: null });
+    await expect(db.query('select set_screen_hidden($1,false)', ['8-1'])).rejects.toThrow('管理员');
+    expect((await screen(second)).map(item => item.content.text)).toContain('隐藏后仍保留');
+    await identity(admin, 'admin'); await db.query('select set_screen_hidden($1,false)', ['8-1']);
+    await identity(third); const state = await scalar<{ items: Shown[]; schedule: unknown }>('select display_state()');
+    expect(state.items.some(item => item.content.text === '隐藏后仍保留')).toBe(true); expect(state.schedule).not.toBeNull();
+    await identity(admin, 'admin'); await expect(db.query('select set_screen_hidden($1,true)', ['9-9'])).rejects.toThrow('班级无效');
+    // Leave the original suite's shared fixtures unchanged.
+    await db.exec('reset role; delete from schedules'); await clearDisplay();
+  });
+  it('lets an unbound device read an empty screen', async () => {
+    await identity(first); expect(await scalar('select display_state()')).toMatchObject({ items: [], schedule: null });
   });
 });

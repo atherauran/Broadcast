@@ -16,9 +16,10 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 
 | RPC | Parameters | Returns / access |
 | --- | --- | --- |
-| `classroom_status` | none | `{server_now, classrooms}`; admin |
+| `classroom_status` | none | `{server_now, classrooms}`, each with `id`, `device_id`, `device_name`, `last_seen_at`, `connected` and `screen_hidden`; admin |
 | `bind_device` | `p_device`, `p_classroom`, `p_name` | empty; admin or server |
 | `unbind_device` | `p_classroom` | empty; admin |
+| `set_screen_hidden` | `p_classroom`, `p_hidden` | empty; admin. Sets `classrooms.screen_hidden` (see Hidden desktop) |
 | `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule, birthdays}`; current device. `display`, `schedule` and `birthdays` are the same as in `display_state` |
 | `pending_broadcasts` | none | `{server_now, items}`; only this device's current class, not started and not expired |
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
@@ -50,7 +51,7 @@ Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`,
 
 `content` by kind:
 - board: `{title, entries, speak, voice_type, theme, flag}`, with title at most 30 characters (default 公告), 1–12 entries of at most 300 characters each, theme `plain` (default), `festive`, `joyful`, `fresh`, `tech` or `safety`, and optional boolean `flag` (default false). All boards share one window, which uses the newest board's theme and shows the flag-raising button when any of them has `flag`. The teacher app always sends `speak: false`, so boards are not read aloud.
-- note: `{text, color}`, with text 1–60 characters and color `yellow`, `blue`, `green` or `pink`.
+- note: `{text, color, font_size}`, with text 1–300 characters, color `yellow`, `blue`, `green` or `pink`, and optional integer `font_size` 18–28 (stored as 20 when omitted; the teacher app offers 18, 20, 24 and 28). Older classroom apps ignore `font_size` and draw notes at 20.
 - countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false. A day count adds `date` (`YYYY-MM-DD`, `fullscreen` must be false): the device shows the calendar days left on its local date, "今天" on the day itself.
 
 Every item starts when it is created (`starts_at` is the server time), unless `p_starts_at` sets a later start (not for countdowns) or it is a scheduled board; the end must fall in the future and within 400 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 12-hour limit, and never replaces anything: up to 3 day counts can be live per class (a fourth is refused), and a timed countdown replaces only another timed one. The device shows the day counts (soonest first) at the top right, above the timetable, in a desktop window that other windows can cover. Beside that column sit the newest timed countdown in its own topmost window and, below it, the notes (oldest first) in a desktop window that other windows can cover, starting a new column to the left when the screen height runs out. A note is refused when 12 notes of a target class would overlap its time on screen. Device queries keep a countdown for 5 seconds past `ends_at`.
@@ -65,15 +66,23 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 `schedules` holds one row per class: `classroom_id`, `days`, `duties`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, from `english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
 
-`duties` is an array of up to 8 `{task, days}`: task 1–10 characters and `days` five name strings (Monday first, at most 40 characters, `''` for nobody). On a weekday by Asia/Shanghai time, `display_state` and `device_heartbeat` add one synthetic note to the items: id `md5(classroom ‖ date)`, `content` `{text, color: 'green'}` with one `task：names` line per job that has names that day, `teacher_name` `今日值日`, `starts_at` 2000-01-01 (so the device, which orders notes by start, puts it first) and `ends_at` the next midnight. It is not a `display_items` row, so it never counts toward the note limit or appears in `display_overview`.
+`duties` is an array of up to 8 `{task, days}`: task 1–10 characters and `days` five name strings (Monday first, at most 40 characters, `''` for nobody). On a weekday by Asia/Shanghai time, `display_state` and `device_heartbeat` put one synthetic note first in the items: id `md5(classroom ‖ date)`, `content` `{text, color: 'green', duty: true}` with one `task：names` line per job that has names that day, `teacher_name` `今日值日`, `starts_at` 2000-01-01 (so the device, which orders notes by start, puts it first) and `ends_at` the next midnight. It is not a `display_items` row, so it never counts toward the note limit or appears in `display_overview`.
 
 ### Birthdays
 
 `birthdays` holds one row per class: `classroom_id`, `students`, `teacher_name`, `updated_by` and `updated_at`. `students` is an array of up to 80 `{name, date}`, name 1–40 characters and date `MM-DD` (02-29 allowed); no birth year is stored. Admins read every row and devices only their class's; writes go through `set_birthdays`. On the PC's local date the device greets that day's birthdays, and on Friday also Saturday's and Sunday's; a 02-29 birthday falls on 02-28 in other years. It shows them as a card at the top of the notes column, and a board titled 晨会通知 (the teacher app's morning meeting template) gets a button that plays a fullscreen greeting.
 
+## Hidden desktop
+
+`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. Classroom apps that predate it pick the change up on their next periodic `display_state` check (at most about 40 seconds); newer ones also subscribe to `classrooms` UPDATEs and refresh at once.
+
+## Teacher names
+
+`p_teacher_name` on `create_broadcast`, `create_display_item` and `save_board_draft` is the name the classroom shows. The teacher app sends the signed-in teacher's name unless the teacher types another one into the 署名 field for that send.
+
 ## Realtime and presence
 
-The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`, `board_drafts`, `schedules` and `birthdays`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items`, `schedules` and `birthdays` changes without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
+The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`, `board_drafts`, `schedules` and `birthdays`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items`, `schedules` and `birthdays` changes and `classrooms` UPDATEs without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
 
 After the subscription succeeds, the classroom starts reporting heartbeats: every 20 seconds it sends a Phoenix keepalive over the WebSocket and waits for the ack (Supabase requires one at least every 25 seconds; it does no database work). Every 120 seconds it also reports the device heartbeat, whose response carries the display state, and the server marks a classroom offline after 270 seconds without a valid heartbeat. Reconnects back off to about 10 seconds and, once restored, query for unexpired messages. Every 40 seconds a healthy connection also re-queries valid deliveries, so a single lost notification is not missed.
 

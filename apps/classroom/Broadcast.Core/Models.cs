@@ -38,7 +38,11 @@ public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, Da
     string Emotion = "normal", int VoiceType = 101001, string Style = "fullscreen", string BannerPosition = "top");
 // One record for every kind: board uses Title/Entries/Speak/VoiceType/Theme/Flag, note Text/Color, countdown Label/Fullscreen, or Date for a day count.
 public sealed record DisplayContent(string? Title = null, string[]? Entries = null, bool Speak = false, int VoiceType = 101001,
-    string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false, string? Date = null, string? Theme = null, bool Flag = false);
+    string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false, string? Date = null, string? Theme = null, bool Flag = false,
+    double? FontSize = null, bool Duty = false)
+{
+    public double NoteFontSize => FontSize is { } size && double.IsFinite(size) ? Math.Clamp(size, 18, 28) : 20;
+}
 public sealed record DisplayItem(Guid Id, string Kind, DisplayContent Content, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string TeacherName);
 public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items, string[][]? Schedule = null, Birthday[]? Birthdays = null);
 public sealed record DaySchedule(DateOnly Date, string[] Periods);

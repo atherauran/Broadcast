@@ -1,6 +1,8 @@
+import { useId } from 'react';
 import { ClipboardList, Megaphone, PanelTop, Send, StickyNote, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { KINDS, countdownError, endError, publishError, validAlert, validBanner, validBoard, validNote, type Classroom, type Kind, type SavedBoard } from '@/lib/domain';
+import { Input } from '@/components/ui/input';
+import { KINDS, countdownError, endError, publishError, validAlert, validBanner, validBoard, validNote, validTeacherName, type Classroom, type Kind, type SavedBoard } from '@/lib/domain';
 import { ClassPicker } from '../class-picker';
 import { AlertForm, BannerForm, BoardForm, CountdownForm, NoteForm } from './forms';
 import { SavedBoards } from './saved-boards';
@@ -29,13 +31,15 @@ export function draftCheck(kind: Kind, drafts: Drafts, now: number): { ok: boole
 }
 
 export function Compose({ kind, setKind, rooms, known, now, selected, setSelected, drafts, patch, ready, busy, onSubmit, onError,
-  saved, teacherName, onSaveDraft, onOpenSaved, onDeleteSaved }: {
+  saved, teacherName, signAs, setSignAs, onSaveDraft, onOpenSaved, onDeleteSaved }: {
   kind: Kind; setKind: (kind: Kind) => void; rooms: Classroom[]; known: boolean; now: number;
   selected: string[]; setSelected: (update: (old: string[]) => string[]) => void;
   drafts: Drafts; patch: Patch; ready: boolean; busy: string; onSubmit: () => void; onError: (message: string) => void;
-  saved: SavedBoard[]; teacherName: string; onSaveDraft: () => void; onOpenSaved: (board: SavedBoard) => void; onDeleteSaved: (id: string) => void;
+  saved: SavedBoard[]; teacherName: string; signAs: string; setSignAs: (name: string) => void; onSaveDraft: () => void; onOpenSaved: (board: SavedBoard) => void; onDeleteSaved: (id: string) => void;
 }) {
   const check = draftCheck(kind, drafts, now);
+  const signed = validTeacherName(signAs);
+  const signId = useId();
   const action = (kind === 'board' && drafts.board.publishAt) || (kind === 'note' && drafts.note.publishAt) ? '定时发布' : actions[kind];
   return <>
     <section className="section"><div className="kind-picker" aria-label="发布方式">{KINDS.map(item => {
@@ -54,9 +58,11 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
       <div className="composer-bottom">
         <span className="selected-count">{selected.length ? <>已选择 <strong>{selected.length}</strong> 个班级</> : '请选择接收班级'}</span>
         <div className="send-actions">
+          <label className="sign-as" htmlFor={signId}>署名<Input id={signId} aria-label="署名" value={signAs} placeholder={teacherName} maxLength={40}
+            className={signed ? '' : 'invalid'} onChange={e => setSignAs(e.target.value)} /></label>
           {kind === 'board' && <Button variant="outline" className="action" onClick={onSaveDraft}
-            disabled={!ready || !!busy || !validBoard(drafts.board.title, drafts.board.entries)}>{busy === 'draft' ? '保存中…' : '存草稿'}</Button>}
-          <Button className="action primary" onClick={onSubmit} disabled={!ready || !!busy || !check.ok || !selected.length}>
+            disabled={!ready || !!busy || !signed || !validBoard(drafts.board.title, drafts.board.entries)}>{busy === 'draft' ? '保存中…' : '存草稿'}</Button>}
+          <Button className="action primary" onClick={onSubmit} disabled={!ready || !!busy || !signed || !check.ok || !selected.length}>
             <Send size={17} />{busy === 'send' ? '发送中…' : action}
           </Button>
         </div>

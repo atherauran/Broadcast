@@ -3,8 +3,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { NOTE_LIMIT, boardEntries, chars, countdownError, endError, endOfDay, localInput, todayAt, upcoming, validBoard, validNote, type DisplayItem } from '@/lib/domain';
-import { EndPicker, Option, TimeSelect } from './compose/fields';
+import { NOTE_FONTS, NOTE_LIMIT, boardEntries, chars, countdownError, endError, endOfDay, localInput, todayAt, upcoming, validBoard, validNote, type DisplayItem } from '@/lib/domain';
+import { Choices, EndPicker, Option, TimeSelect } from './compose/fields';
 import { DateInput, EntryList } from './compose/forms';
 
 const kindTitle = { board: '编辑公告', note: '编辑便签', countdown: '编辑倒计时' };
@@ -17,6 +17,7 @@ export function EditItem({ item, now, ready, busy, onClose, onSave, onError }: {
   const initialEnd = localInput(Date.parse(item.ends_at));
   const [title, setTitle] = useState(item.kind === 'board' ? item.content.title : '');
   const [entries, setEntries] = useState(item.kind === 'board' ? item.content.entries : []);
+  const [fontSize, setFontSize] = useState(item.kind === 'note' ? item.content.font_size ?? 20 : 20);
   const [text, setText] = useState(item.kind === 'note' ? item.content.text : item.kind === 'countdown' ? item.content.label : '');
   const [endAt, setEndAt] = useState(initialEnd);
   const [date, setDate] = useState(item.kind === 'countdown' ? item.content.date ?? '' : '');
@@ -29,7 +30,7 @@ export function EditItem({ item, now, ready, busy, onClose, onSave, onError }: {
     content = { ...item.content, title: title.trim(), entries: boardEntries(entries) };
     ok = validBoard(title, entries);
   } else if (item.kind === 'note') {
-    content = { ...item.content, text: text.trim() };
+    content = { ...item.content, text: text.trim(), font_size: fontSize };
     ok = validNote(text);
   } else {
     content = { ...item.content, label: text.trim(), ...(timer ? {} : { date }) };
@@ -62,6 +63,7 @@ export function EditItem({ item, now, ready, busy, onClose, onSave, onError }: {
         {item.kind === 'countdown' && <Input className="title-input" aria-label="倒计时名称" placeholder="名称" maxLength={20} value={text}
           onChange={e => setText(e.target.value)} />}
         <div className="broadcast-options">
+          {item.kind === 'note' && <Choices legend="字号" value={fontSize} options={NOTE_FONTS} onChange={setFontSize} />}
           {timer && <Option label="结束时间"><div className="choice-row">
             <TimeSelect value={until} label="倒计时结束时间" onChange={next => setEndAt(`${endAt.slice(0, 10)}T${next}`)} />
           </div></Option>}

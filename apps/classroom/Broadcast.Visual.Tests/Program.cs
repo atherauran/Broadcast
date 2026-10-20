@@ -3,10 +3,13 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Media;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using Broadcast.Classroom;
 using Broadcast.Core;
 
 AppBuilder.Configure<Application>().UseSkia().UseHeadless(new AvaloniaHeadlessPlatformOptions { UseHeadlessDrawing = false }).SetupWithoutStarting();
+// Use the production theme so ScrollViewer templates, viewports and interaction are exercised, not just raw measurement.
+Application.Current!.Styles.Add(new Avalonia.Themes.Fluent.FluentTheme());
 var output = args.Length > 0 ? args[0] : Path.Combine(Path.GetTempPath(), "broadcast-visual-tests");
 Directory.CreateDirectory(output);
 foreach (var (name, body, emotion, width, height) in new[]
@@ -233,6 +236,70 @@ AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
 if (notesWindow.Cards.Children.Count != 3) throw new Exception("notes: the birthday card must lead the notes");
 using (var frame = notesWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "notes-birthday.png"));
 notesWindow.Dismiss();
+
+// Notes retain every Unicode scalar, newline and requested font size; oversized text scrolls instead of shrinking or overflowing.
+var longNote = string.Concat(Enumerable.Repeat("便签😀\n", 75));
+foreach (var font in new[] { 18d, 20d, 28d })
+{
+    var longWindow = new NotesWindow();
+    longWindow.Present([Item("note", new DisplayContent(Text: longNote, FontSize: font))], [], today);
+    longWindow.Place(top: 300); longWindow.Show(); Dispatcher.UIThread.RunJobs();
+    var card = (Border)longWindow.Cards.Children.Single();
+    var bodyScroll = card.GetVisualDescendants().OfType<ScrollViewer>().Single();
+    var bodyText = (TextBlock)bodyScroll.Content!;
+    if (bodyText.Text != longNote || bodyText.FontSize != font || bodyText.TextWrapping != TextWrapping.Wrap
+        || bodyScroll.Extent.Height <= bodyScroll.Viewport.Height || bodyScroll.Viewport.Height <= 24
+        || card.Bounds.Height > longWindow.Cards.MaxHeight + .5)
+        throw new Exception($"note-300-{font}: text/size/scroll failed; selected={bodyText.FontSize}, extent={bodyScroll.Extent}, viewport={bodyScroll.Viewport}, card={card.Bounds}, max={longWindow.Cards.MaxHeight}");
+    bodyScroll.Offset = new Vector(0, bodyScroll.Extent.Height); Dispatcher.UIThread.RunJobs();
+    if (bodyScroll.Offset.Y <= 0 || bodyScroll.Offset.Y + bodyScroll.Viewport.Height < bodyScroll.Extent.Height - 1)
+        throw new Exception($"note-300-{font}: the final line is unreachable");
+    AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+    using (var frame = longWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, $"note-300-{font}.png"));
+    // Render the same bounded card at 150% and 200%; DIP size and the readable font must be unchanged.
+    foreach (var factor in new[] { 1.5, 2d })
+    {
+        using var frame = new Avalonia.Media.Imaging.RenderTargetBitmap(new PixelSize((int)Math.Ceiling(card.Bounds.Width * factor), (int)Math.Ceiling(card.Bounds.Height * factor)), new Vector(96 * factor, 96 * factor));
+        frame.Render(card); frame.Save(Path.Combine(output, $"note-300-{font}-{factor * 100:F0}dpi.png"));
+        if (bodyText.FontSize != font) throw new Exception("note: DPI changed the chosen font");
+    }
+    longWindow.Dismiss();
+}
+var crowded = new NotesWindow();
+crowded.Present(Enumerable.Range(0, 12).Select(_ => Item("note", new DisplayContent(Text: longNote, FontSize: 28))).ToArray(), [], today);
+crowded.Show(); Dispatcher.UIThread.RunJobs();
+var across = (ScrollViewer)crowded.Content!;
+if (across.Extent.Width <= across.Viewport.Width || crowded.Bounds.Width > crowded.Screens.Primary!.WorkingArea.Width / crowded.Screens.Primary.Scaling - 47)
+    throw new Exception("notes-300-many: columns must remain reachable within screen width");
+across.Offset = new Vector(across.Extent.Width, 0); Dispatcher.UIThread.RunJobs();
+if (across.Offset.X <= 0) throw new Exception("notes-300-many: horizontal scroll cannot reach all notes");
+crowded.Dismiss();
+Console.WriteLine("PASS long notes: 300 Unicode scalars, 18/20/28px, final-line scrolling, bounded columns, 150/200% rendering");
+
+var dutyNote = Item("note", new DisplayContent(Text: "白板：同学甲\n扫地：同学乙", Color: "green", Duty: true));
+var oldDuty = dutyNote with { Content = dutyNote.Content with { Duty = false }, TeacherName = "今日值日", StartsAt = DateTimeOffset.Parse("2000-01-01T00:00:00Z") };
+var ordinary = Item("note", new DisplayContent(Text: "普通绿色便签", Color: "green"));
+if (!NotesWindow.IsDuty(dutyNote) || !NotesWindow.IsDuty(oldDuty) || NotesWindow.IsDuty(ordinary)
+    || NotesWindow.IsDuty(ordinary with { TeacherName = "今日值日" })) throw new Exception("duty: legacy matching confuses ordinary notes");
+var dutyWindow = new NotesWindow();
+dutyWindow.Present([dutyNote, ordinary], [], today); dutyWindow.Show(); Dispatcher.UIThread.RunJobs();
+var dutyCard = (Border)dutyWindow.Cards.Children[0]; var greenCard = (Border)dutyWindow.Cards.Children[1];
+if (dutyCard.Tag as string != "duty-card" || dutyCard.Background?.ToString() == greenCard.Background?.ToString()
+    || !dutyCard.GetVisualDescendants().OfType<TextBlock>().Any(t => t.Text == "今日值日")) throw new Exception("duty: distinct card styling missing");
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+using (var frame = dutyWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "duty-card.png"));
+dutyWindow.Dismiss();
+Console.WriteLine("PASS duty: dedicated card and legacy compatibility without confusing green notes");
+
+var orderedBoard = new BoardWindow { Width = 1000, Height = 700 };
+orderedBoard.Present([Item("board", new DisplayContent("顺序测试", ["第三条先", "第一条中", "第二条后"]), "李老师")], []);
+orderedBoard.Show(); Dispatcher.UIThread.RunJobs();
+var boardTexts = orderedBoard.Boards.GetVisualDescendants().OfType<TextBlock>().Select(t => t.Text).ToArray();
+if (!boardTexts.Where(t => new[] { "第三条先", "第一条中", "第二条后" }.Contains(t)).SequenceEqual(new[] { "第三条先", "第一条中", "第二条后" })
+    || !boardTexts.Any(t => t?.StartsWith("李老师 · ") == true))
+    throw new Exception("board: received entry order or teacher name changed");
+orderedBoard.Dismiss();
+Console.WriteLine("PASS board: received entry ordering and teacher name");
 
 var dayWindow = new DayCountWindow(clock);
 dayWindow.Present([Day("距离期末", 23), Day("距离中考", 90), Day("距离运动会", 5)]);

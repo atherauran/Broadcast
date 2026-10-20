@@ -236,3 +236,13 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .birthday-date { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; color: #5f6c80; font-weight: 600; }
 .entry-row .birthday-date input { width: 44px; padding: 0 4px; text-align: center; font-variant-numeric: tabular-nums; }
 .tabs button, .character-count { white-space: nowrap; }
+.entry-drag { display: inline-flex; flex: 0 0 22px; cursor: grab; align-items: center; justify-content: center; color: #718096; touch-action: none; }
+.entry-drag:focus-visible { outline: 2px solid #2563eb; border-radius: 4px; }
+.board-entry-row > input { min-width: 0; flex: 1; }
+.entry-moves { display: inline-flex; flex: 0 0 auto; }
+.entry-moves .icon-action { width: 28px; min-width: 28px; padding: 4px; }
+.sign-as { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #5f6c80; white-space: nowrap; }
+.sign-as input { width: 120px; height: 42px; }
+.screen-hidden { color: #8c5c08; }
+.device-actions { display: flex; flex: 0 0 auto; gap: 10px; }
+@media (max-width: 480px) { .board-entry-row { flex-wrap: wrap; gap: 4px; } .entry-moves { margin-left: auto; } }

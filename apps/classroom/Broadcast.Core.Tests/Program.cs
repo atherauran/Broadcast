@@ -27,6 +27,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Birthdays are greeted on the day, and weekend ones on Friday", BirthdayDays),
     ("A board is read once, line by line, only near its start", BoardReadOnce),
     ("A fullscreen broadcast cuts off board reading", PrimaryPreempts),
+    ("Display payloads keep long notes, font sizes and board order", DisplayPayload),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -283,6 +284,22 @@ static async Task DisplayDiff()
     await state.UpdateAsync([note], null, null, default); await state.UpdateAsync([note with { }], null, null, default);
     Check(screen.Applied.Count == 1, "Same state was applied twice");
     await state.UpdateAsync([], null, null, default); Check(screen.Applied.Count == 2 && screen.Last.Count == 0);
+}
+static Task DisplayPayload()
+{
+    var text = string.Concat(Enumerable.Repeat("便签😀\n", 75)); // 300 Unicode scalar values, including newlines and surrogate pairs.
+    Check(text.EnumerateRunes().Count() == 300);
+    var item = Shown("note", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1), new DisplayContent(Text: text, FontSize: 28));
+    var restored = JsonSerializer.Deserialize<DisplayItem>(JsonSerializer.Serialize(item, Json.Options), Json.Options)!;
+    Check(restored.Content.Text == text && restored.Content.NoteFontSize == 28, "Long note lost text or its selected size");
+    var old = JsonSerializer.Deserialize<DisplayContent>("{\"text\":\"旧便签\"}", Json.Options)!;
+    Check(old.NoteFontSize == 20 && !old.Duty, "Legacy payload changed defaults");
+    Check(new DisplayContent(FontSize: 18).NoteFontSize == 18 && new DisplayContent(FontSize: 24).NoteFontSize == 24
+        && new DisplayContent(FontSize: 10).NoteFontSize == 18 && new DisplayContent(FontSize: 48).NoteFontSize == 28
+        && new DisplayContent(FontSize: double.NaN).NoteFontSize == 20, "Note size range");
+    var board = JsonSerializer.Deserialize<DisplayContent>("{\"entries\":[\"第三条\",\"第一条\",\"第二条\"]}", Json.Options)!;
+    Check(board.Entries!.SequenceEqual(new[] { "第三条", "第一条", "第二条" }), "Entry ordering lost");
+    return Task.CompletedTask;
 }
 static async Task BirthdayDays()
 {

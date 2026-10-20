@@ -35,6 +35,8 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [loginName, setLoginName] = useState('');
   const [teacherName, setTeacherName] = useState(rememberedTeacher);
+  // The name shown on what is sent; null means the signed-in teacher's own name.
+  const [signAs, setSignAs] = useState<string | null>(null);
   const [rooms, setRooms] = useState<Classroom[]>(emptyRooms);
   const [selected, setSelected] = useState<string[]>([]);
   const [kind, setKind] = useState<Kind>('alert');
@@ -75,7 +77,7 @@ export default function App() {
       if (data.session && !validTeacherName(rememberedTeacher())) {
         await supabase!.auth.signOut({ scope: 'local' });
         if (!mounted) return;
-        setSession(null); setTeacherName(''); setAuthReady(true);
+        setSession(null); setTeacherName(''); setSignAs(null); setAuthReady(true);
         return;
       }
       setSession(data.session); setAuthReady(true);
@@ -188,7 +190,7 @@ export default function App() {
       const { error } = await supabase!.auth.signOut({ scope: 'local' });
       if (error) throw error;
       localStorage.removeItem(teacherKey);
-      setTeacherName(''); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms); setFeedback(null); setFeedbackOpen(null);
+      setTeacherName(''); setSignAs(null); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms); setFeedback(null); setFeedbackOpen(null);
     });
   }
   async function login() {
@@ -203,10 +205,11 @@ export default function App() {
       localStorage.setItem(teacherKey, name); setTeacherName(name); setPassword(''); setLoginName('');
     });
   }
+  const sender = (signAs ?? teacherName).trim();
   async function sendBroadcast(input: Record<string, unknown>) {
     const classrooms = [...selected].sort();
-    const id = await once('broadcast-attempt', [input, classrooms, teacherName], id =>
-      rpc<string>('create_broadcast', { p_id: id, p_classrooms: classrooms, p_teacher_name: teacherName, ...input }));
+    const id = await once('broadcast-attempt', [input, classrooms, sender], id =>
+      rpc<string>('create_broadcast', { p_id: id, p_classrooms: classrooms, p_teacher_name: sender, ...input }));
     setLatestId(id);
     // While live, the new delivery rows arrive over Realtime and fetch this broadcast themselves.
     if (!live) await getHistory(null, id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
@@ -221,17 +224,17 @@ export default function App() {
     const b = drafts.board;
     const start = publishAt ? Date.parse(publishAt) : now;
     await rpc('save_board_draft', { p_id: b.draftId ?? crypto.randomUUID(), p_content: boardContent(), p_classrooms: [...selected].sort(),
-      p_teacher_name: teacherName, p_ends_at: publishAt || b.endAt ? endsAt(b.endAt, start) : null, p_publish_at: publishAt ? new Date(start).toISOString() : null });
+      p_teacher_name: sender, p_ends_at: publishAt || b.endAt ? endsAt(b.endAt, start) : null, p_publish_at: publishAt ? new Date(start).toISOString() : null });
     if (!live) await Promise.all([getBoardDrafts().then(setBoardDrafts), refreshOverview()]);
   }
   function saveDraft() {
-    void run('draft', async () => { await saveBoard(''); patch('board', blankBoard()); });
+    void run('draft', async () => { await saveBoard(''); patch('board', blankBoard()); setSignAs(null); });
   }
   function openSaved(board: SavedBoard) {
     const { content } = board;
     patch('board', { title: content.title, entries: content.entries, theme: content.theme ?? 'plain', flag: !!content.flag,
       endAt: board.ends_at ? localInput(Date.parse(board.ends_at)) : '', publishAt: board.publish_at ? localInput(Date.parse(board.publish_at)) : '', draftId: board.id });
-    setSelected(board.classrooms);
+    setSelected(board.classrooms); setSignAs(board.teacher_name === teacherName ? null : board.teacher_name);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function deleteSaved(id: string) {
@@ -243,8 +246,8 @@ export default function App() {
   }
   async function createDisplay(display: 'board' | 'note' | 'countdown', content: object, times: object) {
     const classrooms = [...selected].sort();
-    await once('display-attempt', [display, content, times, classrooms, teacherName], id =>
-      rpc('create_display_item', { p_request: id, p_kind: display, p_classrooms: classrooms, p_content: content, p_teacher_name: teacherName, ...times }));
+    await once('display-attempt', [display, content, times, classrooms, sender], id =>
+      rpc('create_display_item', { p_request: id, p_kind: display, p_classrooms: classrooms, p_content: content, p_teacher_name: sender, ...times }));
     if (!live) await refreshOverview().catch(e => setError(message(e)));
   }
   function submit() {
@@ -270,7 +273,7 @@ export default function App() {
       } else if (kind === 'note') {
         const n = drafts.note;
         const start = n.publishAt ? Date.parse(n.publishAt) : now;
-        await createDisplay('note', { text: n.text.trim(), color: n.color },
+        await createDisplay('note', { text: n.text.trim(), color: n.color, font_size: n.fontSize },
           { p_ends_at: endsAt(n.endAt, start), p_starts_at: n.publishAt ? new Date(start).toISOString() : null });
         // An end set for a scheduled day does not carry over to the next note.
         patch('note', n.publishAt ? { text: '', publishAt: '', endAt: '' } : { text: '' });
@@ -281,6 +284,7 @@ export default function App() {
           ? { p_ends_at: new Date(todayAt(now, c.until)).toISOString() } : { p_duration_seconds: c.minutes * 60 });
         patch('countdown', { label: '' });
       }
+      setSignAs(null);
     });
   }
   function resend(item: Broadcast) {
@@ -371,7 +375,7 @@ export default function App() {
       {tab === 'send' && <>
         <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
-          saved={savedBoards(visibleDrafts, visibleOverview, now)} teacherName={teacherName} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
+          saved={savedBoards(visibleDrafts, visibleOverview, now)} teacherName={teacherName} signAs={signAs ?? teacherName} setSignAs={setSignAs} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
         {latest && <section className="section delivery-panel" aria-live="polite">
           <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
           <p className="broadcast-body">{latest.body}</p>
@@ -407,7 +411,11 @@ export default function App() {
           setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
         })} />}
       {tab === 'devices' && <Devices rooms={visibleRooms} ready={ready} busy={busy} onBack={() => setTab('send')}
-        onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })} />}
+        onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })}
+        onHide={(room, hidden) => run('hide', async () => {
+          await rpc('set_screen_hidden', { p_classroom: room.id, p_hidden: hidden });
+          setRooms(old => old.map(item => item.id === room.id ? { ...item, screen_hidden: hidden } : item));
+        })} />}
     </main>
     {feedbackOpen && <FeedbackDialog items={feedback ?? []} maintainer={maintainer} focus={feedbackOpen.focus} onClose={closeFeedback}
       onSubmit={submitFeedback} onComment={commentFeedback} onStatus={setFeedbackStatus} />}

@@ -6,7 +6,7 @@ export interface BannerDraft { body: string; emotion: Emotion; position: BannerP
 export interface BoardDraft {
   title: string; entries: string[]; endAt: string; theme: BoardTheme; flag: boolean; publishAt: string; draftId: string | null;
 }
-export interface NoteDraft { text: string; color: NoteColor; endAt: string; publishAt: string }
+export interface NoteDraft { text: string; color: NoteColor; endAt: string; publishAt: string; fontSize: number }
 export interface CountdownDraft { label: string; mode: 'duration' | 'until' | 'days'; minutes: number; until: string; date: string; fullscreen: boolean }
 export interface Drafts { alert: AlertDraft; banner: BannerDraft; board: BoardDraft; note: NoteDraft; countdown: CountdownDraft }
 export type Patch = <K extends keyof Drafts>(kind: K, change: Partial<Drafts[K]>) => void;
@@ -19,6 +19,6 @@ export const initialDrafts = (): Drafts => ({
   alert: { body: localStorage.getItem('broadcast-draft') || '', repeatCount: 1, autoClose: true, emotion: 'normal', voiceType: 101001, sourceId: null },
   banner: { body: '', emotion: 'normal', position: 'top' },
   board: { title: '', entries: [''], endAt: '', theme: 'plain', flag: false, publishAt: '', draftId: null },
-  note: { text: '', color: 'yellow', endAt: '', publishAt: '' },
+  note: { text: '', color: 'yellow', endAt: '', publishAt: '', fontSize: 20 },
   countdown: { label: '', mode: 'days', minutes: 25, until: '', date: '', fullscreen: false },
 });

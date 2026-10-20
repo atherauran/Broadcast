@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
 using Avalonia.Layout;
+using Avalonia.LogicalTree;
 using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.Threading;
@@ -345,18 +346,28 @@ internal sealed class NotesWindow : StateWindow
     private static readonly Dictionary<string, string> Colors = new()
     { ["yellow"] = "#FFF1A8", ["blue"] = "#D3E5FF", ["green"] = "#D2F0DC", ["pink"] = "#FFD9E6" };
     private readonly ColumnFlow _cards = new() { Gap = Gap };
+    private readonly ScrollViewer _scroller;
     internal ColumnFlow Cards => _cards;
 
     public NotesWindow()
     {
         Chromeless(topmost: false);
-        Content = _cards;
+        _scroller = new ScrollViewer { Content = _cards, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
+        Content = _scroller;
     }
 
     // Extra columns grow leftwards, so the window's width is measured to keep its right edge put.
     protected override void Relayout()
     {
-        _cards.MaxHeight = ScreenHeight - Top;
+        var height = Math.Max(100, ScreenHeight - Top - 24);
+        _cards.MaxHeight = height;
+        foreach (var card in _cards.Children.OfType<Border>())
+        {
+            card.MaxHeight = height;
+            foreach (var scroll in card.GetLogicalDescendants().OfType<ScrollViewer>()) scroll.MaxHeight = Math.Max(24, height - (card.Tag as string == "duty-card" ? 100 : 64));
+        }
+        _scroller.MaxWidth = Screens.Primary is { } screen ? Math.Max(ColumnWidth, screen.WorkingArea.Width / screen.Scaling - ScreenMargin * 2 - Inner) : 1800;
         PlaceRight(ContentSize().Width);
     }
 
@@ -367,6 +378,7 @@ internal sealed class NotesWindow : StateWindow
         if (birthdays.Count > 0) _cards.Children.Add(BirthdayArt.Card(birthdays, today));
         foreach (var note in notes)
         {
+            if (IsDuty(note)) { _cards.Children.Add(DutyCard(note)); continue; }
             var author = Text("— " + note.TeacherName, 14, "#4B5563");
             author.HorizontalAlignment = HorizontalAlignment.Right; author.Margin = new Thickness(0, 4, 0, 0);
             _cards.Children.Add(new Border
@@ -374,11 +386,28 @@ internal sealed class NotesWindow : StateWindow
                 Width = ColumnWidth, Padding = new Thickness(14, 10), CornerRadius = new CornerRadius(12),
                 Background = new SolidColorBrush(Color.Parse(Colors.GetValueOrDefault(note.Content.Color ?? "", Colors["yellow"]))),
                 BorderBrush = new SolidColorBrush(Color.Parse("#1A000000")), BorderThickness = new Thickness(1),
-                Child = new StackPanel { Children = { Text(note.Content.Text ?? "", 20, "#1F2937", FontWeight.Medium), author } },
+                Child = new StackPanel { Children = { new ScrollViewer { Content = Text(note.Content.Text ?? "", note.Content.NoteFontSize, "#1F2937", FontWeight.Medium),
+                    HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+                    VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto }, author } },
             });
         }
         Relayout();
     }
+
+    internal static bool IsDuty(DisplayItem item) => item.Content.Duty || (item.TeacherName == "今日值日" && item.StartsAt.UtcDateTime == new DateTime(2000, 1, 1));
+
+    private static Border DutyCard(DisplayItem item) => new()
+    {
+        Tag = "duty-card", Width = ColumnWidth, Padding = new Thickness(16, 14), CornerRadius = new CornerRadius(12),
+        Background = new SolidColorBrush(Color.Parse("#F0F6FF")), BorderBrush = new SolidColorBrush(Color.Parse("#93B4DE")), BorderThickness = new Thickness(1),
+        Child = new StackPanel { Spacing = 10, Children = {
+            Text("今日值日", 24, "#1E4D81", FontWeight.Bold),
+            new Border { Height = 1, Background = new SolidColorBrush(Color.Parse("#BCD0EA")) },
+            new ScrollViewer { Content = Text(item.Content.Text ?? "", 20, "#243B53", FontWeight.Medium),
+                HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+                VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto },
+        } },
+    };
 }
 
 // Long-term day counts stack at the top right, soonest first, above the timetable; like it, other windows can cover them.
