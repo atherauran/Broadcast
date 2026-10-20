@@ -4,6 +4,7 @@ import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import App from '../app/page';
 import { OnScreen } from '../app/on-screen';
+import { Devices } from '../app/devices';
 import { SavedBoards } from '../app/compose/saved-boards';
 import { CLASSROOM_IDS, type Classroom, type DisplayItem, type SavedBoard } from '../lib/domain';
 
@@ -27,17 +28,16 @@ async function type(input: HTMLInputElement, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
-it('keeps 300-character notes and the old font default editable', async () => {
+it('keeps 300-character notes and offers a few font sizes', async () => {
   await click('便签');
   expect(host.textContent).toContain('/ 300');
-  const font = host.querySelector<HTMLInputElement>('input[aria-label="便签字号"]')!;
-  expect(font.value).toBe('20'); expect(font.min).toBe('18'); expect(font.max).toBe('48');
-  await type(font, '32'); expect(font.value).toBe('32');
+  const sizes = Array.from(host.querySelectorAll('fieldset[aria-label="字号"] button')).map(b => b.textContent);
+  expect(sizes).toEqual(['小', '标准', '大', '特大']);
+  expect(host.querySelector('fieldset[aria-label="字号"] button.active')?.textContent).toBe('标准');
+  await click('特大'); expect(host.querySelector('fieldset[aria-label="字号"] button.active')?.textContent).toBe('特大');
 });
-it('reorders announcement lines by accessible buttons and retains the editable signature', async () => {
+it('reorders announcement lines by accessible buttons', async () => {
   await click('公告板');
-  const signature = host.querySelector<HTMLInputElement>('[aria-label="公告署名"]')!;
-  expect(signature.value).toBe('班主任'); await type(signature, '科学老师');
   await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 条"]')!, '第一条');
   await click('添加一条');
   await type(host.querySelector<HTMLInputElement>('[aria-label="第 2 条"]')!, '第二条');
@@ -45,21 +45,31 @@ it('reorders announcement lines by accessible buttons and retains the editable s
   await act(async () => down.click());
   expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 条"]')!.value).toBe('第二条');
   expect(host.querySelector<HTMLInputElement>('[aria-label="第 2 条"]')!.value).toBe('第一条');
-  expect(signature.value).toBe('科学老师');
 });
-it('keeps hidden items listed and offers a reversible visibility action', async () => {
-  const now = Date.now();
-  const item: DisplayItem = { id: 'hidden', request_id: 'request', classroom_id: '8-1', kind: 'note',
-    content: { text: '稍后恢复', color: 'yellow', hidden: true }, starts_at: new Date(now).toISOString(),
-    ends_at: new Date(now + 3600000).toISOString(), created_at: new Date(now).toISOString(), teacher_name: '老师' };
-  const onVisibility = vi.fn().mockResolvedValue(true);
-  await act(async () => root.render(createElement(OnScreen, { items: [item], rooms: [{ id: '8-1', device_id: null, device_name: null,
-    connected: false, last_seen_at: null }], classes: ['8-1'], known: false, now, ready: true, busy: '',
-    onRemove: vi.fn(), onEdit: vi.fn(), onCopy: vi.fn(), onError: vi.fn(), onVisibility })));
-  await act(async () => (host.querySelector('.screen-heading') as HTMLButtonElement).click());
-  expect(host.textContent).toContain('已隐藏');
-  await act(async () => (host.querySelector('.screen-select') as HTMLButtonElement).click());
-  await click('恢复显示'); expect(onVisibility).toHaveBeenCalledWith(['hidden'], false);
+it('signs every type with the teacher\'s own name unless changed', async () => {
+  await act(async () => root.unmount());
+  localStorage.setItem('broadcast-teacher-session-v2', '王老师');
+  root = createRoot(host); await act(async () => root.render(createElement(App)));
+  for (const kind of ['全屏广播', '横幅', '公告板', '便签', '倒计时']) {
+    await click(kind);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="署名"]')!.value).toBe('王老师');
+  }
+  const sign = host.querySelector<HTMLInputElement>('[aria-label="署名"]')!;
+  await type(sign, '李老师'); await click('全屏广播');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="署名"]')!.value).toBe('李老师');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="署名"]')!, ' ');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="署名"]')!.className).toContain('invalid');
+});
+it('hides and restores a classroom desktop with one click', async () => {
+  const onHide = vi.fn().mockResolvedValue(true);
+  const room: Classroom = { id: '8-1', device_id: 'pc', device_name: '8-1 电脑', connected: true, last_seen_at: null };
+  const render = (screen_hidden: boolean) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden }], ready: true, busy: '',
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide })));
+  await render(false);
+  await click('隐藏桌面'); expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), true);
+  await render(true);
+  expect(host.textContent).toContain('桌面已隐藏');
+  await click('恢复桌面'); expect(onHide).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), false);
 });
 it('mounts the complete app and modal provider without configured cloud credentials', () => {
   expect(host.textContent).toContain('广播服务尚未配置');
@@ -184,7 +194,7 @@ it('edits items that show the same thing, and hides boards that have not appeare
   expect(entry.value).toBe('带水杯');
   await type(entry, '带水杯和雨伞');
   await click('保存', document.querySelector('.edit-card')!);
-  expect(onEdit).toHaveBeenCalledWith(['a1', 'a2'], { ...content, entries: ['带水杯和雨伞'], signature: '班主任' }, at(now + 3_600_000));
+  expect(onEdit).toHaveBeenCalledWith(['a1', 'a2'], { ...content, entries: ['带水杯和雨伞'] }, at(now + 3_600_000));
   expect(document.querySelector('.edit-card')).toBeNull(); expect(host.querySelector('.selection-bar')).toBeNull();
 });
 it('lists scheduled notes with their start and copies ticked items to other classes', async () => {

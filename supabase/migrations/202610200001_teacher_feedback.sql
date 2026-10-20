@@ -1,86 +1,57 @@
--- Teacher feedback: longer notes, adjustable type, editable board signatures,
--- and reversible visibility. Existing rows and RPC signatures remain valid.
-alter function public.display_content(text,jsonb) rename to display_content_before_teacher_feedback;
+-- Teacher feedback: longer notes with a font size, a distinct duty roster, and a per-class switch that clears the classroom desktop.
 
-create function public.display_content(p_kind text, p_content jsonb) returns jsonb
+-- Notes take up to 300 characters and an optional integer font_size of 18–28 (stored as 20 when omitted).
+create or replace function public.display_content(p_kind text, p_content jsonb) returns jsonb
 language plpgsql immutable set search_path = '' as $$
-declare v_result jsonb; v_text text; v_size integer; v_signature text;
+declare v_title text; v_entries jsonb; v_text text;
 begin
   if jsonb_typeof(p_content) is distinct from 'object' then raise exception '显示内容无效'; end if;
-  if p_content ? 'hidden' and jsonb_typeof(p_content->'hidden') <> 'boolean' then raise exception '隐藏选项无效'; end if;
-  if p_kind = 'note' then
-    if jsonb_typeof(p_content->'text') is distinct from 'string' then raise exception '便签内容需要 1–300 字'; end if;
-    v_text := btrim(p_content->>'text');
+  if p_kind = 'board' then
+    v_title := btrim(coalesce(p_content->>'title', ''));
+    if v_title = '' then v_title := '公告'; end if;
+    if char_length(v_title) > 30 then raise exception '标题最多 30 字'; end if;
+    if jsonb_typeof(p_content->'entries') is distinct from 'array' then raise exception '请填写公告内容'; end if;
+    select jsonb_agg(btrim(e) order by n) into v_entries
+      from jsonb_array_elements_text(p_content->'entries') with ordinality as t(e, n) where btrim(e) <> '';
+    if coalesce(jsonb_array_length(v_entries), 0) not between 1 and 12 then raise exception '公告需要 1–12 条'; end if;
+    if exists(select 1 from jsonb_array_elements_text(v_entries) e where char_length(e) > 300) then raise exception '每条公告最多 300 字'; end if;
+    if jsonb_typeof(p_content->'speak') is distinct from 'boolean' then raise exception '请选择是否朗读'; end if;
+    if jsonb_typeof(p_content->'voice_type') is distinct from 'number'
+      or (p_content->>'voice_type') not in ('101001','101004','101011','101013','101016') then raise exception '音色无效'; end if;
+    if coalesce(p_content->>'theme', 'plain') not in ('plain','festive','joyful','fresh','tech','safety') then raise exception '公告背景无效'; end if;
+    if jsonb_typeof(coalesce(p_content->'flag', 'false')) <> 'boolean' then raise exception '升旗选项无效'; end if;
+    return jsonb_build_object('title', v_title, 'entries', v_entries, 'speak', (p_content->'speak')::boolean,
+      'voice_type', (p_content->>'voice_type')::int, 'theme', coalesce(p_content->>'theme', 'plain'),
+      'flag', coalesce((p_content->'flag')::boolean, false));
+  elsif p_kind = 'note' then
+    v_text := btrim(coalesce(p_content->>'text', ''));
     if char_length(v_text) not between 1 and 300 then raise exception '便签内容需要 1–300 字'; end if;
     if coalesce(p_content->>'color', '') not in ('yellow','blue','green','pink') then raise exception '便签颜色无效'; end if;
-    if p_content ? 'font_size' and (jsonb_typeof(p_content->'font_size') <> 'number'
-      or (p_content->>'font_size') !~ '^[0-9]+$') then raise exception '便签字号需要 18–48 的整数'; end if;
-    if p_content ? 'font_size' then
-      if (p_content->>'font_size')::numeric not between 18 and 48 then raise exception '便签字号需要 18–48 的整数'; end if;
-      v_size := (p_content->>'font_size')::integer;
-    else v_size := 20;
+    if p_content ? 'font_size' and (jsonb_typeof(p_content->'font_size') <> 'number' or (p_content->>'font_size') !~ '^[0-9]+$'
+      or (p_content->>'font_size')::numeric not between 18 and 28) then raise exception '便签字号需要 18–28'; end if;
+    return jsonb_build_object('text', v_text, 'color', p_content->>'color', 'font_size', coalesce((p_content->>'font_size')::int, 20));
+  elsif p_kind = 'countdown' then
+    v_text := btrim(coalesce(p_content->>'label', ''));
+    if char_length(v_text) > 20 then raise exception '倒计时名称最多 20 字'; end if;
+    if jsonb_typeof(coalesce(p_content->'fullscreen', 'false')) <> 'boolean' then raise exception '倒计时显示方式无效'; end if;
+    if p_content ? 'date' then
+      if jsonb_typeof(p_content->'date') is distinct from 'string' or char_length(p_content->>'date') <> 10 then raise exception '日期无效'; end if;
+      if coalesce((p_content->'fullscreen')::boolean, false) then raise exception '倒数日不能全屏显示'; end if;
+      return jsonb_build_object('label', v_text, 'fullscreen', false, 'date', (p_content->>'date')::date::text);
     end if;
-    v_result := jsonb_build_object('text', v_text, 'color', p_content->>'color', 'font_size', v_size);
-    -- duty is generated only by device_duty_note, never accepted from teacher input.
-  else
-    v_result := public.display_content_before_teacher_feedback(p_kind, p_content);
-    if p_kind = 'board' then
-      if p_content ? 'signature' and jsonb_typeof(p_content->'signature') <> 'string' then raise exception '公告署名需要 1–40 字'; end if;
-      v_signature := btrim(coalesce(p_content->>'signature', '班主任'));
-      if char_length(v_signature) not between 1 and 40 then raise exception '公告署名需要 1–40 字'; end if;
-      v_result := v_result || jsonb_build_object('signature', v_signature);
-    end if;
+    return jsonb_build_object('label', v_text, 'fullscreen', coalesce((p_content->'fullscreen')::boolean, false));
   end if;
-  if p_content ? 'hidden' then v_result := v_result || jsonb_build_object('hidden', (p_content->>'hidden')::boolean); end if;
-  return v_result;
+  raise exception '显示类型无效';
 end $$;
 
--- Hidden items stay in overview/history and retain their original time range.
--- Every supported classroom, including old clients, receives a filtered snapshot.
-create or replace function public.device_display_items() returns jsonb
-language sql stable security definer set search_path = '' as $$
-  select coalesce(jsonb_agg(jsonb_build_object('id', id, 'kind', kind, 'content', content,
-      'starts_at', starts_at, 'ends_at', ends_at, 'teacher_name', teacher_name) order by created_at, id), '[]'::jsonb)
-  from public.display_items
-  where classroom_id = public.device_classroom() and removed_at is null
-    and coalesce(content->'hidden', 'false'::jsonb) <> 'true'::jsonb
-    and ends_at + case when kind = 'countdown' then interval '5 seconds' else interval '0 seconds' end > clock_timestamp()
-$$;
-
-create function public.set_display_items_hidden(p_ids uuid[], p_hidden boolean) returns void
-language plpgsql security definer set search_path = '' as $$
-begin
-  if not public.is_admin() then raise exception '需要管理员验证'; end if;
-  if p_hidden is null or coalesce(array_length(p_ids, 1), 0) not between 1 and 500 then raise exception '请选择显示内容'; end if;
-  update public.display_items set content = jsonb_set(content, '{hidden}', to_jsonb(p_hidden))
-    where id = any(p_ids) and removed_at is null and ends_at > clock_timestamp();
-  if not found then raise exception '内容已结束或被移除'; end if;
-end $$;
-
-alter table public.schedules add column hidden boolean not null default false;
-alter table public.schedules add column duties_hidden boolean not null default false;
-create function public.set_schedule_visibility(p_classroom text, p_hidden boolean, p_duties_hidden boolean) returns void
-language plpgsql security definer set search_path = '' as $$
-begin
-  if not public.is_admin() then raise exception '需要管理员验证'; end if;
-  if p_hidden is null or p_duties_hidden is null then raise exception '隐藏选项无效'; end if;
-  update public.schedules set hidden = p_hidden, duties_hidden = p_duties_hidden, updated_by = auth.uid(), updated_at = clock_timestamp()
-    where classroom_id = p_classroom;
-  if not found then raise exception '请先保存课表/值日'; end if;
-end $$;
-
-create or replace function public.device_schedule() returns jsonb
-language sql stable security definer set search_path = '' as $$
-  select days from public.schedules where classroom_id = public.device_classroom() and not hidden
-$$;
-
+-- The duty roster note is marked so the classroom can draw it as its own card.
 create or replace function public.device_duty_note() returns jsonb
 language sql stable security definer set search_path = '' as $$
   with today as (select (clock_timestamp() at time zone 'Asia/Shanghai')::date as day),
   lines as (
     select string_agg((d->>'task') || '：' || (d->'days'->>(extract(isodow from t.day)::int - 1)), E'\n' order by k) as text
     from public.schedules s, today t, jsonb_array_elements(s.duties) with ordinality as x(d, k)
-    where s.classroom_id = public.device_classroom() and not s.duties_hidden and extract(isodow from t.day) between 1 and 5
+    where s.classroom_id = public.device_classroom() and extract(isodow from t.day) between 1 and 5
       and d->'days'->>(extract(isodow from t.day)::int - 1) <> ''
   )
   select case when l.text is null then '[]'::jsonb else jsonb_build_array(jsonb_build_object(
@@ -91,24 +62,58 @@ language sql stable security definer set search_path = '' as $$
   from lines l, today t
 $$;
 
--- The roster is first in the wire snapshot as well as in the classroom layout.
+-- While screen_hidden is set the class's desktop shows nothing: no items, timetable, duties or birthdays.
+-- Fullscreen alerts and banners still arrive. Older classroom apps need no update, since the server sends them an empty screen.
+alter table public.classrooms add column screen_hidden boolean not null default false;
+
+create function public.set_screen_hidden(p_classroom text, p_hidden boolean) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception '需要管理员验证'; end if;
+  if p_hidden is null then raise exception '隐藏选项无效'; end if;
+  update public.classrooms set screen_hidden = p_hidden where id = p_classroom;
+  if not found then raise exception '班级无效'; end if;
+end $$;
+
+-- What the device's desktop shows; null for an unbound device.
+create function public.device_screen() returns jsonb
+language sql stable security definer set search_path = '' as $$
+  select case when c.screen_hidden then jsonb_build_object('items', '[]'::jsonb, 'schedule', null, 'birthdays', null)
+    else jsonb_build_object('items', public.device_duty_note() || public.device_display_items(),
+      'schedule', public.device_schedule(), 'birthdays', public.device_birthdays()) end
+  from public.classrooms c where c.id = public.device_classroom()
+$$;
+
 create or replace function public.display_state() returns jsonb
 language sql stable security definer set search_path = '' as $$
-  select jsonb_build_object('server_now', clock_timestamp(), 'items', public.device_duty_note() || public.device_display_items(),
-    'schedule', public.device_schedule(), 'birthdays', public.device_birthdays())
+  select jsonb_build_object('server_now', clock_timestamp(), 'items', '[]'::jsonb, 'schedule', null, 'birthdays', null)
+    || coalesce(public.device_screen(), '{}'::jsonb)
 $$;
+
 create or replace function public.device_heartbeat(p_connected boolean default true) returns jsonb
 language plpgsql security definer set search_path = '' as $$
-declare v_class text;
+declare v_class text; v_screen jsonb;
 begin
   select id into v_class from public.classrooms where device_id = auth.uid();
   if v_class is null then return jsonb_build_object('active', false, 'server_now', clock_timestamp()); end if;
   update public.devices set last_seen_at = clock_timestamp(), connected = p_connected where id = auth.uid();
+  v_screen := public.device_screen();
   return jsonb_build_object('active', true, 'classroom_id', v_class, 'server_now', clock_timestamp(),
-    'display', public.device_duty_note() || public.device_display_items(), 'schedule', public.device_schedule(), 'birthdays', public.device_birthdays());
+    'display', v_screen->'items', 'schedule', v_screen->'schedule', 'birthdays', v_screen->'birthdays');
 end $$;
 
-revoke execute on function public.display_content(text,jsonb), public.display_content_before_teacher_feedback(text,jsonb),
-  public.set_display_items_hidden(uuid[],boolean), public.set_schedule_visibility(text,boolean,boolean) from public, anon;
-grant execute on function public.display_content(text,jsonb) to service_role;
-grant execute on function public.set_display_items_hidden(uuid[],boolean), public.set_schedule_visibility(text,boolean,boolean) to authenticated, service_role;
+create or replace function public.classroom_status() returns jsonb
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then raise exception '需要管理员验证'; end if;
+  return jsonb_build_object('server_now', clock_timestamp(), 'classrooms', (
+    select jsonb_agg(jsonb_build_object('id', c.id, 'device_id', c.device_id, 'device_name', d.name,
+      'last_seen_at', d.last_seen_at, 'screen_hidden', c.screen_hidden,
+      'connected', coalesce(d.connected and d.last_seen_at > clock_timestamp() - interval '270 seconds', false)) order by c.id)
+    from public.classrooms c left join public.devices d on d.id = c.device_id
+  ));
+end $$;
+
+revoke execute on function public.set_screen_hidden(text,boolean), public.device_screen() from public, anon;
+grant execute on function public.set_screen_hidden(text,boolean) to authenticated, service_role;
+grant execute on function public.device_screen() to service_role;

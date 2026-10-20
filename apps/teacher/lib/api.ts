@@ -15,7 +15,7 @@ export const getHistory = (before: string | null = null, id: string | null = nul
   rpc<Broadcast[]>('broadcast_history', { p_before: before, p_id: id });
 export async function getSchedules(): Promise<Schedule[]> {
   if (!supabase) throw new Error('广播服务尚未配置');
-  const { data, error } = await supabase.from('schedules').select('classroom_id, days, duties, teacher_name, updated_at, hidden, duties_hidden');
+  const { data, error } = await supabase.from('schedules').select('classroom_id, days, duties, teacher_name, updated_at');
   if (error) throw new Error(error.message);
   return data;
 }

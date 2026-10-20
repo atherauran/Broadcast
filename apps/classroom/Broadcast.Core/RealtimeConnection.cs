@@ -31,12 +31,13 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
             await SendAsync(topic, "phx_join", "join", new
             {
                 config = new { broadcast = new { ack = false, self = false }, presence = new { key = "" },
-                    // Display items, schedules and birthdays carry no filter: RLS already limits them to this device's classroom.
+                    // Display items, schedules, birthdays and the classroom row carry no filter: RLS already limits them to this device's classroom.
                     postgres_changes = new object[] {
                         new { @event = "INSERT", schema = "public", table = "deliveries", filter = "device_id=eq." + backend.Session.User.Id },
                         new { @event = "*", schema = "public", table = "display_items" },
                         new { @event = "*", schema = "public", table = "schedules" },
-                        new { @event = "*", schema = "public", table = "birthdays" } } },
+                        new { @event = "*", schema = "public", table = "birthdays" },
+                        new { @event = "UPDATE", schema = "public", table = "classrooms" } } },
                 access_token = token
             });
             await ready.Task.WaitAsync(TimeSpan.FromSeconds(15), ct);
@@ -107,7 +108,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
                     }
                     if (kind == "postgres_changes")
                     {
-                        if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("table", out var table) && table.GetString() is "display_items" or "schedules" or "birthdays") displayChanged();
+                        if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("table", out var table) && table.GetString() is "display_items" or "schedules" or "birthdays" or "classrooms") displayChanged();
                         else changed();
                     }
                 }

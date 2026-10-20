@@ -43,11 +43,10 @@ function CopyItems({ classes, count, busy, ready, onClose, onCopy }: {
 }
 
 // Items are ticked, possibly across classes, and removed, edited or copied together from the bar that appears at the bottom.
-export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRemove, onEdit, onCopy, onVisibility, onError }: {
+export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRemove, onEdit, onCopy, onError }: {
   items: DisplayItem[]; rooms: Classroom[]; classes: string[]; known: boolean; now: number; ready: boolean; busy: string;
   onRemove: (ids: string[]) => Promise<boolean>; onEdit: (ids: string[], content: object, endsAt: string) => Promise<boolean>;
   onCopy: (ids: string[], classrooms: string[]) => Promise<boolean>; onError: (message: string) => void;
-  onVisibility?: (ids: string[], hidden: boolean) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>([]);
@@ -64,10 +63,9 @@ export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRem
   async function remove() { if (await onRemove(selected)) setPicked([]); }
   async function edit(content: object, endsAt: string) { if (await onEdit(selected, content, endsAt)) { setEditing(false); setPicked([]); } }
   async function copy(classrooms: string[]) { if (await onCopy(selected, classrooms)) { setCopying(false); setPicked([]); } }
-  async function visibility(hidden: boolean) { if (await onVisibility?.(selected, hidden)) setPicked([]); }
 
   return <section className="history-section">
-    <div className="section-heading"><h1>正在显示</h1><span className="muted">公告板、便签和倒计时（含已隐藏）</span></div>
+    <div className="section-heading"><h1>正在显示</h1><span className="muted">公告板、便签和倒计时</span></div>
     {rooms.map(room => {
       const own = live.filter(item => item.classroom_id === room.id);
       const expanded = own.length > 0 && open.includes(room.id);
@@ -90,7 +88,7 @@ export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRem
               <span className="select-mark">{on && <Check size={14} strokeWidth={3} />}</span>
               <span className={'screen-icon ' + (item.kind === 'note' ? 'note-' + item.content.color : '')}><Icon size={18} /></span>
               <span className="screen-text">
-                <span className="screen-summary">{item.content.hidden && <strong className="hidden-badge">已隐藏 · </strong>}{summary(item, now)}</span>
+                <span className="screen-summary">{summary(item, now)}</span>
                 <span className="muted">{kindLabel[item.kind]} · {item.teacher_name} · {upcoming(item, now) &&
                   <span className="blue">{clockText(item.starts_at, now)} 发布 · </span>}至 {clockText(item.ends_at, now)}</span>
               </span>
@@ -107,10 +105,6 @@ export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRem
       <Button variant="outline" className="action" onClick={() => setPicked([])}>取消</Button>
       {editable && <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => setEditing(true)}>编辑</Button>}
       <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => setCopying(true)}>复制</Button>
-      {onVisibility && chosen.some(item => !item.content.hidden) && <Button variant="outline" className="action" disabled={!ready || !!busy}
-        onClick={() => void visibility(true)}>隐藏</Button>}
-      {onVisibility && chosen.some(item => item.content.hidden) && <Button variant="outline" className="action" disabled={!ready || !!busy}
-        onClick={() => void visibility(false)}>恢复显示</Button>}
       <Button className="action primary" disabled={!ready || !!busy} onClick={() => void remove()}>{busy === 'remove' ? '移除中…' : '移除'}</Button>
     </div>}
     {copying && <CopyItems classes={classes} count={new Set(chosen.map(item => item.request_id)).size} busy={busy} ready={ready} onClose={() => setCopying(false)} onCopy={classrooms => void copy(classrooms)} />}

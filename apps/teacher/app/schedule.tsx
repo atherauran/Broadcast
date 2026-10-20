@@ -13,10 +13,9 @@ const thisSchoolDay = () => { const day = new Date().getDay(); return day >= 1 &
 const blankDuty = (): Duty => ({ task: '', days: SCHOOL_DAYS.map(() => '') });
 
 // Unsaved timetables live in the parent, so switching class or tab keeps them. Duty jobs are shared by the week; each day tab edits that day's names.
-export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, ready, busy, onSave, onVisibility, onError }: {
+export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, ready, busy, onSave, onError }: {
   classes: string[]; schedules: Schedule[]; drafts: Record<string, Timetable>; setDrafts: (update: (old: Record<string, Timetable>) => Record<string, Timetable>) => void;
   now: number; ready: boolean; busy: string; onSave: (classroom: string, timetable: Timetable) => Promise<boolean>; onError: (message: string) => void;
-  onVisibility?: (classroom: string, hidden: boolean, dutiesHidden: boolean) => Promise<boolean>;
 }) {
   const [classroom, setClassroom] = useState(() => localStorage.getItem(classKey) || '');
   const [day, setDay] = useState(thisSchoolDay);
@@ -54,13 +53,6 @@ export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, rea
       </div>
     </section>
     {classroom && <section className="section composer">
-      {saved && onVisibility && <div className="schedule-visibility">
-        <Button variant="outline" className="action" disabled={!ready || !!busy}
-          onClick={() => void onVisibility(classroom, !saved.hidden, !!saved.duties_hidden)}>{saved.hidden ? '恢复课表显示' : '隐藏课表'}</Button>
-        <Button variant="outline" className="action" disabled={!ready || !!busy}
-          onClick={() => void onVisibility(classroom, !!saved.hidden, !saved.duties_hidden)}>{saved.duties_hidden ? '恢复值日表显示' : '隐藏值日表'}</Button>
-        <span className="muted">只切换教室显示，不删除已保存内容</span>
-      </div>}
       <div className="day-tabs" aria-label="星期">{SCHOOL_DAYS.map((label, at) => <button type="button" key={label} className={at === day ? 'active' : ''}
         aria-pressed={at === day} onClick={() => setDay(at)}>{label}<small>{week[at].length ? `${week[at].length} 节` : '空'}</small></button>)}</div>
       <ol className="entry-list period-list">{periods.map((id, index) => <li key={index} className="entry-row">

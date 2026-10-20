@@ -27,8 +27,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Birthdays are greeted on the day, and weekend ones on Friday", BirthdayDays),
     ("A board is read once, line by line, only near its start", BoardReadOnce),
     ("A fullscreen broadcast cuts off board reading", PrimaryPreempts),
-    ("Display payloads preserve long notes, sizes, signatures and board order", DisplayPayload),
-    ("Hidden state is filtered without losing content and restores normally", HiddenDisplay),
+    ("Display payloads keep long notes, font sizes and board order", DisplayPayload),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -290,36 +289,17 @@ static Task DisplayPayload()
 {
     var text = string.Concat(Enumerable.Repeat("便签😀\n", 75)); // 300 Unicode scalar values, including newlines and surrogate pairs.
     Check(text.EnumerateRunes().Count() == 300);
-    var item = Shown("note", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1), new DisplayContent(Text: text, FontSize: 48));
+    var item = Shown("note", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddHours(1), new DisplayContent(Text: text, FontSize: 28));
     var restored = JsonSerializer.Deserialize<DisplayItem>(JsonSerializer.Serialize(item, Json.Options), Json.Options)!;
-    Check(restored.Content.Text == text && restored.Content.NoteFontSize == 48, "Long note lost text or its selected size");
+    Check(restored.Content.Text == text && restored.Content.NoteFontSize == 28, "Long note lost text or its selected size");
     var old = JsonSerializer.Deserialize<DisplayContent>("{\"text\":\"旧便签\"}", Json.Options)!;
-    Check(old.NoteFontSize == 20 && !old.Hidden && !old.Duty, "Legacy payload changed defaults");
-    Check(new DisplayContent(FontSize: 18).NoteFontSize == 18 && new DisplayContent(FontSize: 32.5).NoteFontSize == 32.5
-        && new DisplayContent(FontSize: 48).NoteFontSize == 48 && new DisplayContent(FontSize: 10).NoteFontSize == 18
-        && new DisplayContent(FontSize: 99).NoteFontSize == 48 && new DisplayContent(FontSize: double.NaN).NoteFontSize == 20, "Note size range");
-    var board = JsonSerializer.Deserialize<DisplayContent>("{\"entries\":[\"第三条\",\"第一条\",\"第二条\"],\"signature\":\"班主任\"}", Json.Options)!;
-    Check(board.Entries!.SequenceEqual(new[] { "第三条", "第一条", "第二条" }) && board.BoardSignature("旧老师") == "班主任", "Entry ordering or signature lost");
-    Check(old.BoardSignature("旧老师") == "旧老师" && new DisplayContent(Signature: " ").BoardSignature("旧老师") == "旧老师");
+    Check(old.NoteFontSize == 20 && !old.Duty, "Legacy payload changed defaults");
+    Check(new DisplayContent(FontSize: 18).NoteFontSize == 18 && new DisplayContent(FontSize: 24).NoteFontSize == 24
+        && new DisplayContent(FontSize: 10).NoteFontSize == 18 && new DisplayContent(FontSize: 48).NoteFontSize == 28
+        && new DisplayContent(FontSize: double.NaN).NoteFontSize == 20, "Note size range");
+    var board = JsonSerializer.Deserialize<DisplayContent>("{\"entries\":[\"第三条\",\"第一条\",\"第二条\"]}", Json.Options)!;
+    Check(board.Entries!.SequenceEqual(new[] { "第三条", "第一条", "第二条" }), "Entry ordering lost");
     return Task.CompletedTask;
-}
-static async Task HiddenDisplay()
-{
-    var clock = new ServerClock(); var now = clock.Now; var screen = new FakeScreen();
-    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
-    var board = Shown("board", now.AddMinutes(-1), now.AddHours(1), new DisplayContent(Entries: ["保留顺序二", "保留顺序一"], Hidden: true));
-    var note = Shown("note", now.AddMinutes(-1), now.AddHours(1), new DisplayContent(Text: "隐藏但保留", Hidden: true));
-    var timer = Shown("countdown", now.AddMinutes(-1), now.AddMinutes(5), new DisplayContent(Hidden: true));
-    await state.UpdateAsync([board, note, timer], null, null, default);
-    Check(screen.Last.Count == 0 && board.Content.Entries!.Length == 2 && note.Content.Text == "隐藏但保留", "Hidden data deleted or displayed");
-    await state.UpdateAsync([board with { Content = board.Content with { Hidden = false } }, note with { Content = note.Content with { Hidden = false } }, timer], null, null, default);
-    Check(screen.Last.Select(i => i.Id).SequenceEqual(new[] { board.Id, note.Id }) && screen.Last[0].Content.Entries!.SequenceEqual(board.Content.Entries!), "Unhide failed to restore content and ordering");
-    // A hidden schedule stays on the server; the existing wire format sends null, then restores its week unchanged.
-    string[][] week = [["english"], ["math"], ["physics"], ["art"], ["club"]];
-    clock.Sync(new DateTimeOffset(new DateTime(2026, 10, 19, 9, 0, 0, DateTimeKind.Local)));
-    await state.UpdateAsync([], week, null, default); Check(screen.Today?.Periods.Single() == "english");
-    await state.UpdateAsync([], null, null, default); Check(screen.Today is null);
-    await state.UpdateAsync([], week, null, default); Check(screen.Today?.Periods.Single() == "english" && week.Length == 5);
 }
 static async Task BirthdayDays()
 {

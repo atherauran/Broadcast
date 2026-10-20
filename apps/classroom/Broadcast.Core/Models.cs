@@ -39,11 +39,9 @@ public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, Da
 // One record for every kind: board uses Title/Entries/Speak/VoiceType/Theme/Flag, note Text/Color, countdown Label/Fullscreen, or Date for a day count.
 public sealed record DisplayContent(string? Title = null, string[]? Entries = null, bool Speak = false, int VoiceType = 101001,
     string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false, string? Date = null, string? Theme = null, bool Flag = false,
-    double? FontSize = null, string? Signature = null, bool Hidden = false, bool Duty = false)
+    double? FontSize = null, bool Duty = false)
 {
-    // Preserve old payloads; malformed/out-of-range sizes cannot make a note unreadable or break layout.
-    public double NoteFontSize => FontSize is { } size && double.IsFinite(size) ? Math.Clamp(size, 18, 48) : 20;
-    public string BoardSignature(string teacherName) => string.IsNullOrWhiteSpace(Signature) ? teacherName : Signature;
+    public double NoteFontSize => FontSize is { } size && double.IsFinite(size) ? Math.Clamp(size, 18, 28) : 20;
 }
 public sealed record DisplayItem(Guid Id, string Kind, DisplayContent Content, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string TeacherName);
 public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items, string[][]? Schedule = null, Birthday[]? Birthdays = null);

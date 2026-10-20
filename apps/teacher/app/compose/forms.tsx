@@ -1,10 +1,10 @@
-import { Fragment, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, CalendarDays, GripVertical, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_TEMPLATES, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
+import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_TEMPLATES, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_FONTS, NOTE_LIMIT, TEMPLATES,
   chars, daysUntil, fillTemplate, localInput, moveEntry, nextAt, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
 import { Choices, EmotionPicker, EndPicker, Option, PublishPicker, TimeSelect, VoicePicker } from './fields';
 import { blankBoard, type AlertDraft, type BannerDraft, type BoardDraft, type CountdownDraft, type NoteDraft } from './drafts';
@@ -165,15 +165,12 @@ export function BoardForm({ draft, now, onChange, onError }: {
   draft: BoardDraft; now: number; onChange: (change: Partial<BoardDraft>) => void; onError: (message: string) => void;
 }) {
   const start = draft.publishAt ? Date.parse(draft.publishAt) : now;
-  const signatureId = useId();
   return <>
     <Heading title="公告内容" hint={draft.draftId ? '正在编辑已保存的公告' : '多行可直接粘贴'}
       extra={BOARD_TEMPLATES.map(item => <button type="button" key={item.label} className="template-chip"
         onClick={() => onChange({ title: item.title, endAt: nextAt(start, item.end) })}>{item.label}</button>)}
       action={draft.draftId && <Button type="button" variant="link" className="heading-action" onClick={() => onChange(blankBoard())}>取消编辑</Button>} />
     <Input className="title-input" aria-label="公告标题" placeholder="标题（默认为“公告”）" maxLength={30} value={draft.title} onChange={e => onChange({ title: e.target.value })} />
-    <label className="signature-field" htmlFor={signatureId}>公告署名<Input id={signatureId} aria-label="公告署名" value={draft.signature}
-      placeholder="班主任或学科老师" onChange={e => onChange({ signature: e.target.value })} /></label>
     <EntryList entries={draft.entries} onChange={entries => onChange({ entries })} onError={onError} />
     <div className="broadcast-options">
       <Option label="背景"><div className="choice-row theme-row">
@@ -198,19 +195,11 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
         {NOTE_COLORS.map(color => <button type="button" key={color.id} className={'color-choice note-' + color.id + (draft.color === color.id ? ' active' : '')}
           aria-pressed={draft.color === color.id} onClick={() => onChange({ color: color.id })}>{color.label}</button>)}
       </div></Option>
-      <NoteFont value={draft.fontSize} onChange={fontSize => onChange({ fontSize })} />
+      <Choices legend="字号" value={draft.fontSize} options={NOTE_FONTS} onChange={fontSize => onChange({ fontSize })} />
       <PublishPicker publishAt={draft.publishAt} endAt={draft.endAt} now={now} onChange={onChange} />
       <EndPicker endAt={draft.endAt} now={now} from={draft.publishAt ? Date.parse(draft.publishAt) : now} onChange={endAt => onChange({ endAt })} />
     </div>
   </>;
-}
-
-export function NoteFont({ value, onChange }: { value: number; onChange: (size: number) => void }) {
-  return <Option label="便签字号"><div className="choice-row">
-    <Input type="number" min={18} max={48} step={1} aria-label="便签字号" value={Number.isNaN(value) ? '' : value}
-      onChange={e => onChange(e.target.valueAsNumber)} className="note-font-input" />
-    <span className="muted">18–48，默认 20</span>
-  </div></Option>;
 }
 
 // A yyyy/mm/dd mask: typed digits replace the placeholder letters one by one and the slashes stay put.

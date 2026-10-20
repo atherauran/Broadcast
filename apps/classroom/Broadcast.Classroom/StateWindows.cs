@@ -200,7 +200,7 @@ internal sealed class BoardWindow : StateWindow
                     Grid.SetColumn(body, 1); row.Children.Add(number); row.Children.Add(body);
                     _texts.Add((number, 1)); _texts.Add((body, 1)); block.Children.Add(row);
                 }
-                if (i >= entries.Length - 1) Add(block, Text($"{board.Content.BoardSignature(board.TeacherName)} · {Until(board.EndsAt)}", 22, look.Muted), .7);
+                if (i >= entries.Length - 1) Add(block, Text($"{board.TeacherName} · {Until(board.EndsAt)}", 22, look.Muted), .7);
                 _blocks.Add((block, i == 0));
             }
         }
@@ -378,7 +378,6 @@ internal sealed class NotesWindow : StateWindow
         if (birthdays.Count > 0) _cards.Children.Add(BirthdayArt.Card(birthdays, today));
         foreach (var note in notes)
         {
-            if (note.Content.Hidden) continue;
             if (IsDuty(note)) { _cards.Children.Add(DutyCard(note)); continue; }
             var author = Text("— " + note.TeacherName, 14, "#4B5563");
             author.HorizontalAlignment = HorizontalAlignment.Right; author.Margin = new Thickness(0, 4, 0, 0);
@@ -646,9 +645,9 @@ internal sealed class StateDisplay(ServerClock clock, BroadcastDisplay alerts, I
     {
         _birthdays = birthdays;
         var date = DateOnly.FromDateTime(clock.Now.LocalDateTime);
-        var boards = visible.Where(i => !i.Content.Hidden && i.Kind == "board").OrderByDescending(i => i.StartsAt).ToArray();
-        var notes = visible.Where(i => !i.Content.Hidden && i.Kind == "note").OrderBy(i => i.StartsAt).ToArray();
-        var countdowns = visible.Where(i => !i.Content.Hidden && i.Kind == "countdown").ToArray();
+        var boards = visible.Where(i => i.Kind == "board").OrderByDescending(i => i.StartsAt).ToArray();
+        var notes = visible.Where(i => i.Kind == "note").OrderBy(i => i.StartsAt).ToArray();
+        var countdowns = visible.Where(i => i.Kind == "countdown").ToArray();
         var days = countdowns.Where(i => i.Content.Date is not null).OrderBy(i => i.EndsAt).ToArray();
         _timer = countdowns.Where(i => i.Content.Date is null).MaxBy(i => i.StartsAt);
         Sync(ref _board, boards.Length > 0, NewBoard, w => w.Present(boards, birthdays), WindowLayer.ShowBehindLesson);
