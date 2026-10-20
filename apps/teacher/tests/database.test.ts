@@ -51,6 +51,7 @@ beforeAll(async () => {
   await db.query('select bind_device($1,$2,$3)', [second, '8-2', 'classroom-two']);
 });
 afterAll(async () => { await db?.close(); });
+
 describe('database contract and RLS (real PostgreSQL engine)', () => {
   it('seeds the six classrooms and the hidden test one', async () => { await identity(admin, 'admin'); expect(await scalar<string[]>('select array_agg(id order by id) from classrooms')).toEqual(['8-1', '8-2', '8-3', '8-4', '8-5', '8-6', 'Test']); });
   it('rejects a second device competing for an occupied classroom', async () => { await identity(admin, 'admin'); await expect(db.query('select bind_device($1,$2,$3)', [third, '8-1', 'competitor'])).rejects.toThrow('已被其他设备绑定'); });
@@ -382,5 +383,62 @@ describe('board themes and schedules', () => {
     await expect(save('8-9', week)).rejects.toThrow('班级');
     await identity(first); await expect(save('8-3', week)).rejects.toThrow('管理员');
     await expect(db.query("update schedules set days='[]'")).rejects.toThrow('permission denied');
+  });
+});
+
+describe('teacher feedback options and reversible visibility', () => {
+  it('accepts 300 Unicode note characters and validates font size while keeping old clients valid', async () => {
+    await clearDisplay();
+    await show('note', { text: '😀'.repeat(300), color: 'yellow', font_size: 48 });
+    await show('note', { text: '旧版便签', color: 'blue' });
+    const items = await screen();
+    expect(items.find(item => item.content.text === '旧版便签')?.content.font_size).toBe(20);
+    expect(items.find(item => item.content.font_size === 48)?.content.text).toBe('😀'.repeat(300));
+    await expect(show('note', { text: '字'.repeat(301), color: 'yellow' })).rejects.toThrow('300');
+    for (const size of [17, 49, 20.5, '20', null]) await expect(show('note', { text: 'bad', color: 'yellow', font_size: size })).rejects.toThrow('字号');
+  });
+  it('keeps board order and signature across drafts, publishing, editing and copying', async () => {
+    await clearDisplay();
+    const content = { title: '晨会', entries: ['第三条', '第一条'], speak: false, voice_type: 101001, signature: '数学老师' };
+    const id = await show('board', content);
+    const row = await rowId(id);
+    const stored = await scalar<{ signature: string; entries: string[] }>('select content from display_items where id=$1', [row]);
+    expect(stored).toMatchObject({ signature: '数学老师', entries: ['第三条', '第一条'] });
+    await db.query('select update_display_items($1,$2,$3::timestamptz)', [[row], JSON.stringify({ ...content, signature: '语文老师' }), new Date(Date.now() + 3600000).toISOString()]);
+    await db.query('select copy_display_items($1,$2,$3,$4)', [crypto.randomUUID(), [row], ['8-2'], '代发老师']);
+    expect((await screen(second)).find(item => item.kind === 'board')?.content.signature).toBe('语文老师');
+    await identity(admin, 'admin');
+    const draft = crypto.randomUUID();
+    await db.query('select save_board_draft($1,$2,$3,$4,$5::timestamptz,$6::timestamptz)', [draft, JSON.stringify(content), ['8-1'], '发布老师', null, null]);
+    expect(await scalar('select content->>\'signature\' from board_drafts where id=$1', [draft])).toBe('数学老师');
+    await expect(show('board', { ...content, signature: ' ' })).rejects.toThrow('署名');
+    await expect(show('board', { ...content, signature: '字'.repeat(41) })).rejects.toThrow('署名');
+  });
+  it('hides and restores without deleting content or changing expiry, and rejects device writes', async () => {
+    await clearDisplay(); const request = await show('note', { text: '隐藏后仍保留', color: 'pink' }); const id = await rowId(request);
+    const original = await scalar('select ends_at from display_items where id=$1', [id]);
+    await db.query('select set_display_items_hidden($1,true)', [[id]]);
+    expect((await screen()).some(item => item.id === id)).toBe(false);
+    await identity(admin, 'admin');
+    expect((await scalar<{ items: Array<{ id: string }> }>('select display_overview()')).items.some(item => item.id === id)).toBe(true);
+    expect(await scalar('select removed_at from display_items where id=$1', [id])).toBeNull();
+    expect(await scalar('select ends_at from display_items where id=$1', [id])).toEqual(original);
+    await db.query('select set_display_items_hidden($1,false)', [[id]]);
+    expect((await screen()).some(item => item.id === id)).toBe(true);
+    await expect(db.query('select set_display_items_hidden($1,true)', [[id]])).rejects.toThrow('管理员');
+  });
+  it('hides timetable and duties independently while preserving the saved week', async () => {
+    const week = [['math'], ['math'], ['math'], ['math'], ['math']];
+    await identity(admin, 'admin');
+    await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify(week), '老师', JSON.stringify([{ task: '白板', days: ['A','B','C','D','E'] }])]);
+    await db.query('select set_schedule_visibility($1,true,true)', ['8-1']);
+    await identity(third); const state = await scalar<{ schedule: unknown; items: Shown[] }>('select display_state()');
+    expect(state.schedule).toBeNull(); expect(state.items.some(item => item.content.duty === true)).toBe(false);
+    await expect(db.query('select set_schedule_visibility($1,false,false)', ['8-1'])).rejects.toThrow('管理员');
+    await identity(admin, 'admin'); expect(await scalar('select days from schedules where classroom_id=$1', ['8-1'])).toEqual(week);
+    await db.query('select set_schedule_visibility($1,false,false)', ['8-1']);
+    await identity(third); expect((await scalar<{ schedule: unknown }>('select display_state()')).schedule).toEqual(week);
+    // Leave the original suite's shared fixtures unchanged.
+    await db.exec('reset role; delete from schedules; delete from board_drafts'); await clearDisplay();
   });
 });

@@ -27,6 +27,40 @@ async function type(input: HTMLInputElement, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+it('keeps 300-character notes and the old font default editable', async () => {
+  await click('便签');
+  expect(host.textContent).toContain('/ 300');
+  const font = host.querySelector<HTMLInputElement>('input[aria-label="便签字号"]')!;
+  expect(font.value).toBe('20'); expect(font.min).toBe('18'); expect(font.max).toBe('48');
+  await type(font, '32'); expect(font.value).toBe('32');
+});
+it('reorders announcement lines by accessible buttons and retains the editable signature', async () => {
+  await click('公告板');
+  const signature = host.querySelector<HTMLInputElement>('[aria-label="公告署名"]')!;
+  expect(signature.value).toBe('班主任'); await type(signature, '科学老师');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 条"]')!, '第一条');
+  await click('添加一条');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 2 条"]')!, '第二条');
+  const down = host.querySelector<HTMLButtonElement>('[aria-label="下移第 1 条"]')!;
+  await act(async () => down.click());
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 条"]')!.value).toBe('第二条');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 2 条"]')!.value).toBe('第一条');
+  expect(signature.value).toBe('科学老师');
+});
+it('keeps hidden items listed and offers a reversible visibility action', async () => {
+  const now = Date.now();
+  const item: DisplayItem = { id: 'hidden', request_id: 'request', classroom_id: '8-1', kind: 'note',
+    content: { text: '稍后恢复', color: 'yellow', hidden: true }, starts_at: new Date(now).toISOString(),
+    ends_at: new Date(now + 3600000).toISOString(), created_at: new Date(now).toISOString(), teacher_name: '老师' };
+  const onVisibility = vi.fn().mockResolvedValue(true);
+  await act(async () => root.render(createElement(OnScreen, { items: [item], rooms: [{ id: '8-1', device_id: null, device_name: null,
+    connected: false, last_seen_at: null }], classes: ['8-1'], known: false, now, ready: true, busy: '',
+    onRemove: vi.fn(), onEdit: vi.fn(), onCopy: vi.fn(), onError: vi.fn(), onVisibility })));
+  await act(async () => (host.querySelector('.screen-heading') as HTMLButtonElement).click());
+  expect(host.textContent).toContain('已隐藏');
+  await act(async () => (host.querySelector('.screen-select') as HTMLButtonElement).click());
+  await click('恢复显示'); expect(onVisibility).toHaveBeenCalledWith(['hidden'], false);
+});
 it('mounts the complete app and modal provider without configured cloud credentials', () => {
   expect(host.textContent).toContain('广播服务尚未配置');
   expect(host.querySelectorAll('.class-card')).toHaveLength(6);
@@ -150,7 +184,7 @@ it('edits items that show the same thing, and hides boards that have not appeare
   expect(entry.value).toBe('带水杯');
   await type(entry, '带水杯和雨伞');
   await click('保存', document.querySelector('.edit-card')!);
-  expect(onEdit).toHaveBeenCalledWith(['a1', 'a2'], { ...content, entries: ['带水杯和雨伞'] }, at(now + 3_600_000));
+  expect(onEdit).toHaveBeenCalledWith(['a1', 'a2'], { ...content, entries: ['带水杯和雨伞'], signature: '班主任' }, at(now + 3_600_000));
   expect(document.querySelector('.edit-card')).toBeNull(); expect(host.querySelector('.selection-bar')).toBeNull();
 });
 it('lists scheduled notes with their start and copies ticked items to other classes', async () => {

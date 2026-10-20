@@ -58,7 +58,10 @@ export const ALERT_LIMIT = 300;
 export const BANNER_LIMIT = 80;
 export const BOARD_ENTRIES = 12;
 export const BOARD_ENTRY_LIMIT = 300;
-export const NOTE_LIMIT = 60;
+export const NOTE_LIMIT = 300;
+export const NOTE_FONT_DEFAULT = 20;
+export const validNoteFont = (size: number) => Number.isInteger(size) && size >= 18 && size <= 48;
+export const validSignature = (value: string) => chars(value) > 0 && chars(value) <= 40;
 export type NoteColor = 'yellow' | 'blue' | 'green' | 'pink';
 export const NOTE_COLORS: { id: NoteColor; label: string }[] = [
   { id: 'yellow', label: '黄' }, { id: 'blue', label: '蓝' }, { id: 'green', label: '绿' }, { id: 'pink', label: '粉' },
@@ -70,9 +73,9 @@ export const BOARD_THEMES: { id: BoardTheme; label: string }[] = [
   { id: 'fresh', label: '清新' }, { id: 'tech', label: '科技' }, { id: 'safety', label: '提醒' },
 ];
 // flag adds a button that plays the national anthem with the flag in the classroom.
-export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number; theme?: BoardTheme; flag?: boolean }
-export interface NoteContent { text: string; color: NoteColor }
-export interface CountdownContent { label: string; fullscreen: boolean; date?: string }
+export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number; theme?: BoardTheme; flag?: boolean; signature?: string; hidden?: boolean }
+export interface NoteContent { text: string; color: NoteColor; font_size?: number; hidden?: boolean; duty?: boolean }
+export interface CountdownContent { label: string; fullscreen: boolean; date?: string; hidden?: boolean }
 export type DisplayItem = {
   id: string; request_id: string; classroom_id: string; starts_at: string; ends_at: string;
   teacher_name: string; created_at: string;
@@ -170,6 +173,12 @@ export function validBanner(body: string): boolean {
 }
 export function boardEntries(entries: string[]): string[] {
   return entries.map(entry => entry.trim()).filter(Boolean);
+}
+export function moveEntry(entries: string[], from: number, to: number): string[] {
+  if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= entries.length || to >= entries.length) return entries;
+  const next = [...entries];
+  next.splice(to, 0, next.splice(from, 1)[0]);
+  return next;
 }
 // Splits pasted text into announcement lines, dropping blank lines and "1." / "2、" / "(3)" style numbering.
 export function pastedLines(text: string): string[] {
@@ -270,10 +279,9 @@ export interface Duty { task: string; days: string[] }
 export const DUTY_LIMIT = 8;
 // What the 课表/值日 tab edits for one class.
 export type Timetable = { days: Week; duties: Duty[] };
-export interface Schedule { classroom_id: string; days: Week; duties: Duty[]; teacher_name: string; updated_at: string }
+export interface Schedule { classroom_id: string; days: Week; duties: Duty[]; teacher_name: string; updated_at: string; hidden?: boolean; duties_hidden?: boolean }
 export function patchSchedule(schedules: Schedule[], row: Schedule): Schedule[] {
-  const { classroom_id, days, duties, teacher_name, updated_at } = row;
-  return [...schedules.filter(item => item.classroom_id !== classroom_id), { classroom_id, days, duties, teacher_name, updated_at }];
+  return [...schedules.filter(item => item.classroom_id !== row.classroom_id), { ...row }];
 }
 // Jobs as saved: trimmed, and blank rows dropped.
 export const dutyRows = (duties: Duty[]): Duty[] => duties.map(duty => ({ task: duty.task.trim(), days: duty.days.map(name => name.trim()) }))

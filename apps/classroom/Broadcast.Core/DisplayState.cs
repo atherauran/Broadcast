@@ -17,7 +17,7 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
     public event Action<Exception>? Error;
 
     public static bool Visible(DisplayItem item, DateTimeOffset now) =>
-        item.StartsAt <= now && now < item.EndsAt + (item.Kind == "countdown" ? CountdownLinger : TimeSpan.Zero);
+        !item.Content.Hidden && item.StartsAt <= now && now < item.EndsAt + (item.Kind == "countdown" ? CountdownLinger : TimeSpan.Zero);
 
     // The timetable for the PC's local date; nothing on weekends (Sunday is -1, Saturday 5) or on a day without lessons.
     public static DaySchedule? Today(string[][]? week, DateTimeOffset now)

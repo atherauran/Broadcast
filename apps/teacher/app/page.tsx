@@ -214,7 +214,7 @@ export default function App() {
   const boardContent = () => {
     const b = drafts.board;
     // Boards are never read aloud; the server still expects the reading fields.
-    return { title: b.title.trim(), entries: boardEntries(b.entries), speak: false, voice_type: 101001, theme: b.theme, flag: b.flag };
+    return { title: b.title.trim(), entries: boardEntries(b.entries), speak: false, voice_type: 101001, theme: b.theme, flag: b.flag, signature: b.signature.trim() };
   };
   // Saving under the same id replaces the earlier draft or schedule; without publishAt it stays a draft.
   async function saveBoard(publishAt: string) {
@@ -229,7 +229,7 @@ export default function App() {
   }
   function openSaved(board: SavedBoard) {
     const { content } = board;
-    patch('board', { title: content.title, entries: content.entries, theme: content.theme ?? 'plain', flag: !!content.flag,
+    patch('board', { title: content.title, entries: content.entries, theme: content.theme ?? 'plain', flag: !!content.flag, signature: content.signature ?? '班主任',
       endAt: board.ends_at ? localInput(Date.parse(board.ends_at)) : '', publishAt: board.publish_at ? localInput(Date.parse(board.publish_at)) : '', draftId: board.id });
     setSelected(board.classrooms);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -270,7 +270,7 @@ export default function App() {
       } else if (kind === 'note') {
         const n = drafts.note;
         const start = n.publishAt ? Date.parse(n.publishAt) : now;
-        await createDisplay('note', { text: n.text.trim(), color: n.color },
+        await createDisplay('note', { text: n.text.trim(), color: n.color, font_size: n.fontSize },
           { p_ends_at: endsAt(n.endAt, start), p_starts_at: n.publishAt ? new Date(start).toISOString() : null });
         // An end set for a scheduled day does not carry over to the next note.
         patch('note', n.publishAt ? { text: '', publishAt: '', endAt: '' } : { text: '' });
@@ -384,6 +384,11 @@ export default function App() {
         </button>}
       </>}
       {tab === 'screen' && <OnScreen items={visibleOverview} rooms={visibleRooms} classes={classIds} known={known} now={now} ready={ready} busy={busy}
+        onVisibility={(ids, hidden) => run('visibility', async () => {
+          await rpc('set_display_items_hidden', { p_ids: ids, p_hidden: hidden });
+          // Patch immediately, including when the realtime notification is delayed.
+          setOverview(old => old.map(item => ids.includes(item.id) ? { ...item, content: { ...item.content, hidden } } as DisplayItem : item));
+        })}
         onRemove={ids => run('remove', async () => { await rpc('remove_display_items', { p_ids: ids }); if (!live) await refreshOverview(); })}
         onEdit={(ids, content, ends) => run('edit', async () => {
           await rpc('update_display_items', { p_ids: ids, p_content: content, p_ends_at: ends }); if (!live) await refreshOverview();
@@ -397,9 +402,13 @@ export default function App() {
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
         onResend={resend} rooms={visibleRooms} known={known} now={now} configured={configured} />}
       {tab === 'schedule' && <ScheduleEditor classes={classIds} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
+        onVisibility={(classroom, hidden, dutiesHidden) => run('visibility', async () => {
+          await rpc('set_schedule_visibility', { p_classroom: classroom, p_hidden: hidden, p_duties_hidden: dutiesHidden });
+          setSchedules(old => old.map(item => item.classroom_id === classroom ? { ...item, hidden, duties_hidden: dutiesHidden } : item));
+        })}
         onSave={(classroom, { days, duties }) => run('schedule', async () => {
           await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
-          setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
+          setSchedules(old => patchSchedule(old, { ...old.find(item => item.classroom_id === classroom), classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
         })} />}
       {tab === 'birthdays' && <BirthdayEditor classes={classIds} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
         onError={setError} onSave={(classroom, students) => run('birthdays', async () => {

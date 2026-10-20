@@ -1,6 +1,6 @@
 import { ClipboardList, Megaphone, PanelTop, Send, StickyNote, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { KINDS, countdownError, endError, publishError, validAlert, validBanner, validBoard, validNote, type Classroom, type Kind, type SavedBoard } from '@/lib/domain';
+import { KINDS, countdownError, endError, publishError, validAlert, validBanner, validBoard, validNote, validNoteFont, validSignature, type Classroom, type Kind, type SavedBoard } from '@/lib/domain';
 import { ClassPicker } from '../class-picker';
 import { AlertForm, BannerForm, BoardForm, CountdownForm, NoteForm } from './forms';
 import { SavedBoards } from './saved-boards';
@@ -16,12 +16,12 @@ export function draftCheck(kind: Kind, drafts: Drafts, now: number): { ok: boole
   if (kind === 'board') {
     const b = drafts.board;
     const hint = publishError(b.publishAt, now) || endError(b.endAt, now, b.publishAt ? Date.parse(b.publishAt) : now);
-    return { ok: validBoard(b.title, b.entries) && !hint, hint };
+    return { ok: validBoard(b.title, b.entries) && validSignature(b.signature) && !hint, hint: hint || (!validSignature(b.signature) ? '公告署名需要 1–40 字' : '') };
   }
   if (kind === 'note') {
     const n = drafts.note;
     const hint = publishError(n.publishAt, now) || endError(n.endAt, now, n.publishAt ? Date.parse(n.publishAt) : now);
-    return { ok: validNote(n.text) && !hint, hint };
+    return { ok: validNote(n.text) && validNoteFont(n.fontSize) && !hint, hint: hint || (!validNoteFont(n.fontSize) ? '便签字号需要 18–48 的整数' : '') };
   }
   const c = drafts.countdown;
   const hint = countdownError(c.mode, c.minutes, c.until, now, c.date);
@@ -55,7 +55,7 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
         <span className="selected-count">{selected.length ? <>已选择 <strong>{selected.length}</strong> 个班级</> : '请选择接收班级'}</span>
         <div className="send-actions">
           {kind === 'board' && <Button variant="outline" className="action" onClick={onSaveDraft}
-            disabled={!ready || !!busy || !validBoard(drafts.board.title, drafts.board.entries)}>{busy === 'draft' ? '保存中…' : '存草稿'}</Button>}
+            disabled={!ready || !!busy || !validBoard(drafts.board.title, drafts.board.entries) || !validSignature(drafts.board.signature)}>{busy === 'draft' ? '保存中…' : '存草稿'}</Button>}
           <Button className="action primary" onClick={onSubmit} disabled={!ready || !!busy || !check.ok || !selected.length}>
             <Send size={17} />{busy === 'send' ? '发送中…' : action}
           </Button>

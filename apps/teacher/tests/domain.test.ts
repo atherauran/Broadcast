@@ -34,7 +34,7 @@ describe('display styles', () => {
     expect(validBanner('字'.repeat(80))).toBe(true); expect(validBanner('字'.repeat(81))).toBe(false); expect(validBanner(' ')).toBe(false);
     expect(validBoard('', ['', ' 明天穿校服 '])).toBe(true); expect(validBoard('', ['', ' '])).toBe(false);
     expect(validBoard('', Array(13).fill('条'))).toBe(false); expect(validBoard('', ['字'.repeat(300)])).toBe(true); expect(validBoard('', ['字'.repeat(301)])).toBe(false);
-    expect(validNote('字'.repeat(60))).toBe(true); expect(validNote('字'.repeat(61))).toBe(false);
+    expect(validNote('字'.repeat(300))).toBe(true); expect(validNote('字'.repeat(301))).toBe(false);
   });
   it('defaults the end time to the end of the local day', () => {
     expect(localInput(local)).toBe('2026-10-04T14:03'); expect(endOfDay(local)).toBe('2026-10-04T23:59');

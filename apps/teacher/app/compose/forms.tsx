@@ -1,11 +1,11 @@
-import { Fragment, useEffect, useRef, useState, type ClipboardEvent, type KeyboardEvent, type ReactNode } from 'react';
-import { CalendarDays, Plus, X } from 'lucide-react';
+import { Fragment, useEffect, useId, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { ArrowDown, ArrowUp, CalendarDays, GripVertical, Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { ALERT_LIMIT, BANNER_LIMIT, BOARD_ENTRIES, BOARD_ENTRY_LIMIT, BOARD_TEMPLATES, BOARD_THEMES, COUNTDOWN_MINUTES, NOTE_COLORS, NOTE_LIMIT, TEMPLATES,
-  chars, daysUntil, fillTemplate, localInput, nextAt, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
+  chars, daysUntil, fillTemplate, localInput, moveEntry, nextAt, pastedLines, soonTime, templateBlanks, weekday, type BoardTheme } from '@/lib/domain';
 import { Choices, EmotionPicker, EndPicker, Option, PublishPicker, TimeSelect, VoicePicker } from './fields';
 import { blankBoard, type AlertDraft, type BannerDraft, type BoardDraft, type CountdownDraft, type NoteDraft } from './drafts';
 
@@ -106,6 +106,10 @@ function ThemeArt({ theme }: { theme: BoardTheme }) {
 export function EntryList({ entries, onChange, onError }: { entries: string[]; onChange: (entries: string[]) => void; onError: (message: string) => void }) {
   const setEntry = (index: number, value: string) => onChange(entries.map((entry, at) => at === index ? value : entry));
   const list = useRef<HTMLOListElement>(null);
+  const dragging = useRef<number | null>(null);
+  const move = (from: number, to: number) => { focusAt.current = to; onChange(moveEntry(entries, from, to)); };
+  const allowDrop = (e: DragEvent) => { if (dragging.current !== null) e.preventDefault(); };
+  const drop = (index: number, e: DragEvent) => { if (dragging.current === null) return; e.preventDefault(); move(dragging.current, index); dragging.current = null; };
   const focusAt = useRef<number | null>(null);
   function paste(index: number, e: ClipboardEvent<HTMLInputElement>) {
     const text = e.clipboardData.getData('text');
@@ -136,10 +140,19 @@ export function EntryList({ entries, onChange, onError }: { entries: string[]; o
     input?.setSelectionRange(input.value.length, input.value.length);
   }, [entries]);
   return <>
-    <ol className="entry-list" ref={list}>{entries.map((entry, index) => <li key={index} className="entry-row">
+    <ol className="entry-list" ref={list}>{entries.map((entry, index) => <li key={index} className="entry-row board-entry-row">
+      <button type="button" className="entry-drag" draggable aria-label={`拖动第 ${index + 1} 条排序`}
+        onDragStart={e => { dragging.current = index; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(index)); }}
+        onDragEnd={() => { dragging.current = null; }} onDragOver={allowDrop} onDrop={e => drop(index, e)}><GripVertical size={16} /></button>
       <span className="entry-number">{index + 1}</span>
       <Input aria-label={`第 ${index + 1} 条`} placeholder="公告内容" value={entry} className={chars(entry) > BOARD_ENTRY_LIMIT ? 'invalid' : ''}
-        onChange={e => setEntry(index, e.target.value)} onPaste={e => paste(index, e)} onKeyDown={e => enter(index, e)} />
+        onChange={e => setEntry(index, e.target.value)} onPaste={e => paste(index, e)} onKeyDown={e => enter(index, e)} onDragOver={allowDrop} onDrop={e => drop(index, e)} />
+      {entries.length > 1 && <span className="entry-moves">
+        <Button type="button" variant="ghost" className="icon-action" aria-label={`上移第 ${index + 1} 条`} disabled={index === 0}
+          onClick={() => move(index, index - 1)}><ArrowUp size={15} /></Button>
+        <Button type="button" variant="ghost" className="icon-action" aria-label={`下移第 ${index + 1} 条`} disabled={index === entries.length - 1}
+          onClick={() => move(index, index + 1)}><ArrowDown size={15} /></Button>
+      </span>}
       {entries.length > 1 && <Button type="button" variant="ghost" className="icon-action" aria-label={`删除第 ${index + 1} 条`}
         onClick={() => onChange(entries.filter((_, at) => at !== index))}><X size={18} /></Button>}
     </li>)}</ol>
@@ -152,12 +165,15 @@ export function BoardForm({ draft, now, onChange, onError }: {
   draft: BoardDraft; now: number; onChange: (change: Partial<BoardDraft>) => void; onError: (message: string) => void;
 }) {
   const start = draft.publishAt ? Date.parse(draft.publishAt) : now;
+  const signatureId = useId();
   return <>
     <Heading title="公告内容" hint={draft.draftId ? '正在编辑已保存的公告' : '多行可直接粘贴'}
       extra={BOARD_TEMPLATES.map(item => <button type="button" key={item.label} className="template-chip"
         onClick={() => onChange({ title: item.title, endAt: nextAt(start, item.end) })}>{item.label}</button>)}
       action={draft.draftId && <Button type="button" variant="link" className="heading-action" onClick={() => onChange(blankBoard())}>取消编辑</Button>} />
     <Input className="title-input" aria-label="公告标题" placeholder="标题（默认为“公告”）" maxLength={30} value={draft.title} onChange={e => onChange({ title: e.target.value })} />
+    <label className="signature-field" htmlFor={signatureId}>公告署名<Input id={signatureId} aria-label="公告署名" value={draft.signature}
+      placeholder="班主任或学科老师" onChange={e => onChange({ signature: e.target.value })} /></label>
     <EntryList entries={draft.entries} onChange={entries => onChange({ entries })} onError={onError} />
     <div className="broadcast-options">
       <Option label="背景"><div className="choice-row theme-row">
@@ -182,10 +198,19 @@ export function NoteForm({ draft, now, onChange }: { draft: NoteDraft; now: numb
         {NOTE_COLORS.map(color => <button type="button" key={color.id} className={'color-choice note-' + color.id + (draft.color === color.id ? ' active' : '')}
           aria-pressed={draft.color === color.id} onClick={() => onChange({ color: color.id })}>{color.label}</button>)}
       </div></Option>
+      <NoteFont value={draft.fontSize} onChange={fontSize => onChange({ fontSize })} />
       <PublishPicker publishAt={draft.publishAt} endAt={draft.endAt} now={now} onChange={onChange} />
       <EndPicker endAt={draft.endAt} now={now} from={draft.publishAt ? Date.parse(draft.publishAt) : now} onChange={endAt => onChange({ endAt })} />
     </div>
   </>;
+}
+
+export function NoteFont({ value, onChange }: { value: number; onChange: (size: number) => void }) {
+  return <Option label="便签字号"><div className="choice-row">
+    <Input type="number" min={18} max={48} step={1} aria-label="便签字号" value={Number.isNaN(value) ? '' : value}
+      onChange={e => onChange(e.target.valueAsNumber)} className="note-font-input" />
+    <span className="muted">18–48，默认 20</span>
+  </div></Option>;
 }
 
 // A yyyy/mm/dd mask: typed digits replace the placeholder letters one by one and the slashes stay put.
