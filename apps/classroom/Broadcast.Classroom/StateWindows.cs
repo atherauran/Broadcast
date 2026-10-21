@@ -482,9 +482,10 @@ internal sealed class ScheduleWindow : StateWindow
         ["morality"] = "道德与法治", ["art"] = "艺术 Art/Music", ["it"] = "信息科技 IT", ["elective"] = "选修 Optional", ["club"] = "社团 Club",
         ["lunch"] = "午餐 Lunch",
     };
-    // Lessons last 40 minutes with 15-minute breaks from 8:30 and from 12:40; the lesson before lunch ends 5 minutes early.
+    // Lessons last 40 minutes with 15-minute breaks from 8:30 and from 12:40; the lesson before lunch ends 5 minutes early,
+    // and on Wednesday the break before the 9th lesson is only 10 minutes.
     private static readonly TimeOnly MorningStart = new(8, 30), AfternoonStart = new(12, 40);
-    private const int Lesson = 40, Break = 15, LunchEarly = 5;
+    private const int Lesson = 40, Break = 15, LunchEarly = 5, WednesdayBreak = 10;
     private readonly StackPanel _rows = new();
     private DaySchedule? _today;
     internal StackPanel Rows => _rows;
@@ -503,7 +504,7 @@ internal sealed class ScheduleWindow : StateWindow
     public void Present(DaySchedule today) { _today = today; Relayout(); }
 
     // Each row's start and end: lessons before lunch count from the morning start, those after it from the afternoon start.
-    internal static (TimeOnly Start, TimeOnly End)[] Times(string[] periods)
+    internal static (TimeOnly Start, TimeOnly End)[] Times(string[] periods, DayOfWeek day)
     {
         var lunch = Array.IndexOf(periods, "lunch");
         var times = new (TimeOnly Start, TimeOnly End)[periods.Length];
@@ -512,6 +513,7 @@ internal sealed class ScheduleWindow : StateWindow
             if (i == lunch) continue;
             var morning = lunch < 0 || i < lunch;
             var start = (morning ? MorningStart : AfternoonStart).AddMinutes((morning ? i : i - lunch - 1) * (Lesson + Break));
+            if (day == DayOfWeek.Wednesday && (morning ? i : i - 1) >= 8) start = start.AddMinutes(WednesdayBreak - Break);
             times[i] = (start, start.AddMinutes(i == lunch - 1 ? Lesson - LunchEarly : Lesson));
         }
         if (lunch >= 0) times[lunch] = (lunch > 0 ? times[lunch - 1].End : AfternoonStart, AfternoonStart);
@@ -534,7 +536,7 @@ internal sealed class ScheduleWindow : StateWindow
         var names = today.Periods.Select(id => Text(Names.GetValueOrDefault(id, id), NameSize * fit, "#1F2937", FontWeight.SemiBold)).ToArray();
         var widest = names.Max(name => { name.TextWrapping = TextWrapping.NoWrap; name.Measure(Size.Infinity); return name.DesiredSize.Width; });
         var nameSize = NameSize * fit * Math.Min(1, (ColumnWidth - 6 - 28) / widest);
-        var times = Times(today.Periods);
+        var times = Times(today.Periods, today.Date.DayOfWeek);
         for (var i = 0; i < names.Length; i++)
         {
             names[i].FontSize = nameSize;

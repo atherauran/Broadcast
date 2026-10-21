@@ -321,11 +321,12 @@ var lunch = (Border)schedule.Rows.Children[5];
 if (schedule.Topmost || schedule.ShowInTaskbar || schedule.Rows.Children.Count != 10 || Cell(0, 0).Text != "10/12 Monday"
     || Cell(5, 0).Text != "午餐 Lunch" || lunch.Background is null || Cell(1, 1).Text != "8:30–9:10" || Cell(5, 1).Text != "11:50–12:40")
     throw new Exception("schedule: header, rows, times or lunch row failed");
-// 8-4's Wednesday: four lessons, lunch, five more.
-var wednesday = ScheduleWindow.Times(["chinese", "chinese", "math", "pe", "lunch", "english", "english", "physics", "biology", "club"])
-    .Select(t => $"{t.Start:H:mm}-{t.End:H:mm}");
-if (string.Join(" ", wednesday) != "8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:20-17:00")
-    throw new Exception("schedule: lesson times are wrong: " + string.Join(" ", wednesday));
+// 8-4's Wednesday: four lessons, lunch, five more; its last break is 10 minutes, so the 9th lesson starts 5 minutes earlier than any other day.
+string[] nine = ["chinese", "chinese", "math", "pe", "lunch", "english", "english", "physics", "biology", "club"];
+string Clock(DayOfWeek day) => string.Join(" ", ScheduleWindow.Times(nine, day).Select(t => $"{t.Start:H:mm}-{t.End:H:mm}"));
+if (Clock(DayOfWeek.Wednesday) != "8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:15-16:55")
+    throw new Exception("schedule: Wednesday lesson times are wrong: " + Clock(DayOfWeek.Wednesday));
+if (!Clock(DayOfWeek.Monday).EndsWith("15:25-16:05 16:20-17:00")) throw new Exception("schedule: other days keep 15-minute breaks: " + Clock(DayOfWeek.Monday));
 if (schedule.RowHeight < 40) throw new Exception("schedule: rows must fill the column readably");
 using (var frame = schedule.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "schedule.png"));
 // A long day under tall day counts leaves short rows; each name and time must still fit its row.
