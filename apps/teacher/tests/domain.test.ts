@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { classesInLesson, lessonTimes, daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem, type Schedule } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -105,5 +105,31 @@ describe('pasted birthdays', () => {
   });
   it('accepts plain lines and Chinese dates, and skips impossible ones', () => {
     expect(pastedBirthdays('张三 3月12日\n李四 2-30\n王五 2012-02-29')).toEqual([{ name: '张三', date: '03-12' }, { name: '王五', date: '02-29' }]);
+  });
+});
+describe('class time', () => {
+  const wednesday = ['chinese', 'chinese', 'math', 'pe', 'lunch', 'english', 'english', 'physics', 'biology', 'club'];
+  const hm = (minute: number) => `${Math.floor(minute / 60)}:${String(minute % 60).padStart(2, '0')}`;
+  const clock = (day: number) => lessonTimes(wednesday, day).map(([start, end]) => `${hm(start)}-${hm(end)}`).join(' ');
+  it('times lessons the way the classroom shows them, with a shorter last break on Wednesday', () => {
+    expect(clock(3)).toBe('8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:15-16:55');
+    expect(clock(1).endsWith('15:25-16:05 16:20-17:00')).toBe(true);
+  });
+  it('finds the target classes in a lesson, not at break, lunch, weekends or without a timetable', () => {
+    const week = (day: string[]) => [[], [], day, [], []];
+    const schedules: Schedule[] = [
+      { classroom_id: '8-4', days: week(wednesday), duties: [], teacher_name: '王老师', updated_at: '' },
+      { classroom_id: '8-2', days: week(['math']), duties: [], teacher_name: '王老师', updated_at: '' },
+    ];
+    const at = (day: number, hours: number, minutes: number) => new Date(2026, 9, day, hours, minutes).getTime();
+    const ids = ['8-1', '8-2', '8-4'];
+    expect(classesInLesson(schedules, ids, at(21, 8, 30))).toEqual(['8-2', '8-4']);
+    expect(classesInLesson(schedules, ids, at(21, 9, 30))).toEqual(['8-4']);
+    expect(classesInLesson(schedules, ids, at(21, 9, 10))).toEqual([]);
+    expect(classesInLesson(schedules, ids, at(21, 12, 0))).toEqual([]);
+    expect(classesInLesson(schedules, ids, at(21, 16, 15))).toEqual(['8-4']);
+    expect(classesInLesson(schedules, ids, at(21, 16, 55))).toEqual([]);
+    expect(classesInLesson(schedules, ids, at(22, 9, 30))).toEqual([]);
+    expect(classesInLesson(schedules, ids, at(24, 9, 30))).toEqual([]);
   });
 });

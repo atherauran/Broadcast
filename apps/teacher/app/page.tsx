@@ -3,9 +3,10 @@ import type { Session } from '@supabase/supabase-js';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { registerBroadcastTools } from '@/lib/webmcp';
 import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getHistory, getOverview, getSchedules, maintainerEmail, once, rpc, supabase } from '@/lib/api';
-import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, classesInLesson, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
   type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Timetable } from '@/lib/domain';
 import { Login } from './login';
@@ -58,6 +59,8 @@ export default function App() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  // Target classes in a lesson when a fullscreen send waits for the teacher's confirmation.
+  const [inLesson, setInLesson] = useState<string[]>([]);
   const [live, setLive] = useState(false);
   const [network, setNetwork] = useState(navigator.onLine);
   const [now, setNow] = useState(Date.now);
@@ -250,7 +253,14 @@ export default function App() {
       rpc('create_display_item', { p_request: id, p_kind: display, p_classrooms: classrooms, p_content: content, p_teacher_name: sender, ...times }));
     if (!live) await refreshOverview().catch(e => setError(message(e)));
   }
+  // What takes over the whole classroom screen asks first while a target class is in a lesson.
   function submit() {
+    const c = drafts.countdown;
+    const fullscreen = kind === 'alert' || (kind === 'countdown' && c.mode !== 'days' && c.fullscreen);
+    const busyClasses = fullscreen ? classesInLesson(schedules, [...selected].sort(), now) : [];
+    if (busyClasses.length) setInLesson(busyClasses); else send();
+  }
+  function send() {
     void run('send', async () => {
       if (kind === 'alert') {
         const a = drafts.alert;
@@ -376,6 +386,16 @@ export default function App() {
         <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
           saved={savedBoards(visibleDrafts, visibleOverview, now)} teacherName={teacherName} signAs={signAs ?? teacherName} setSignAs={setSignAs} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
+        <AlertDialog open={inLesson.length > 0} onOpenChange={open => { if (!open) setInLesson([]); }}>
+          <AlertDialogContent className="confirm-card">
+            <AlertDialogTitle>现在是上课时间，可能影响当前的课堂进程，您确认要发布吗？</AlertDialogTitle>
+            <AlertDialogDescription>{inLesson.join('、')} 正在上课。</AlertDialogDescription>
+            <div className="confirm-actions">
+              <AlertDialogCancel className="action">取消</AlertDialogCancel>
+              <Button className="action primary" onClick={() => { setInLesson([]); send(); }}>确认发布</Button>
+            </div>
+          </AlertDialogContent>
+        </AlertDialog>
         {latest && <section className="section delivery-panel" aria-live="polite">
           <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
           <p className="broadcast-body">{latest.body}</p>

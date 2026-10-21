@@ -282,6 +282,29 @@ export function patchSchedule(schedules: Schedule[], row: Schedule): Schedule[] 
   const { classroom_id, days, duties, teacher_name, updated_at } = row;
   return [...schedules.filter(item => item.classroom_id !== classroom_id), { classroom_id, days, duties, teacher_name, updated_at }];
 }
+// Each period's start and end in minutes after midnight, as the classroom shows them: 40-minute lessons with 15-minute breaks
+// from 8:30 before lunch and from 12:40 after it, the lesson before lunch ending 5 minutes early. On Wednesday (day 3) the break
+// before the 9th lesson is only 10 minutes.
+export function lessonTimes(periods: string[], day: number): [number, number][] {
+  const lunch = periods.indexOf('lunch');
+  const [morning, afternoon] = [8 * 60 + 30, 12 * 60 + 40];
+  const times = periods.map((_, i): [number, number] => {
+    const before = lunch < 0 || i < lunch;
+    const start = (before ? morning + i * 55 : afternoon + (i - lunch - 1) * 55) - (day === 3 && (before ? i : i - 1) >= 8 ? 5 : 0);
+    return [start, start + (i === lunch - 1 ? 35 : 40)];
+  });
+  if (lunch >= 0) times[lunch] = [lunch > 0 ? times[lunch - 1][1] : afternoon, afternoon];
+  return times;
+}
+// The classes among ids whose timetable has a lesson (not lunch) running at now.
+export function classesInLesson(schedules: Schedule[], ids: string[], now: number): string[] {
+  const date = new Date(now);
+  const minute = date.getHours() * 60 + date.getMinutes();
+  return ids.filter(id => {
+    const periods = schedules.find(item => item.classroom_id === id)?.days[date.getDay() - 1] ?? [];
+    return lessonTimes(periods, date.getDay()).some(([start, end], i) => periods[i] !== 'lunch' && minute >= start && minute < end);
+  });
+}
 // Jobs as saved: trimmed, and blank rows dropped.
 export const dutyRows = (duties: Duty[]): Duty[] => duties.map(duty => ({ task: duty.task.trim(), days: duty.days.map(name => name.trim()) }))
   .filter(duty => duty.task || duty.days.some(Boolean));
