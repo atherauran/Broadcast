@@ -110,9 +110,10 @@ describe('pasted birthdays', () => {
 describe('class time', () => {
   const wednesday = ['chinese', 'chinese', 'math', 'pe', 'lunch', 'english', 'english', 'physics', 'biology', 'club'];
   const hm = (minute: number) => `${Math.floor(minute / 60)}:${String(minute % 60).padStart(2, '0')}`;
-  it('times lessons the way the classroom shows them', () => {
-    expect(lessonTimes(wednesday).map(([start, end]) => `${hm(start)}-${hm(end)}`).join(' ')).toBe(
-      '8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:20-17:00');
+  const clock = (day: number) => lessonTimes(wednesday, day).map(([start, end]) => `${hm(start)}-${hm(end)}`).join(' ');
+  it('times lessons the way the classroom shows them, with a shorter last break on Wednesday', () => {
+    expect(clock(3)).toBe('8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:15-16:55');
+    expect(clock(1).endsWith('15:25-16:05 16:20-17:00')).toBe(true);
   });
   it('finds the target classes in a lesson, not at break, lunch, weekends or without a timetable', () => {
     const week = (day: string[]) => [[], [], day, [], []];
@@ -126,7 +127,8 @@ describe('class time', () => {
     expect(classesInLesson(schedules, ids, at(21, 9, 30))).toEqual(['8-4']);
     expect(classesInLesson(schedules, ids, at(21, 9, 10))).toEqual([]);
     expect(classesInLesson(schedules, ids, at(21, 12, 0))).toEqual([]);
-    expect(classesInLesson(schedules, ids, at(21, 17, 0))).toEqual([]);
+    expect(classesInLesson(schedules, ids, at(21, 16, 15))).toEqual(['8-4']);
+    expect(classesInLesson(schedules, ids, at(21, 16, 55))).toEqual([]);
     expect(classesInLesson(schedules, ids, at(22, 9, 30))).toEqual([]);
     expect(classesInLesson(schedules, ids, at(24, 9, 30))).toEqual([]);
   });
