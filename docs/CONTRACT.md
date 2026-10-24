@@ -74,7 +74,7 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 ## Hidden desktop
 
-`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. Classroom apps that predate it pick the change up on their next periodic `display_state` check (at most about 40 seconds); newer ones also subscribe to `classrooms` UPDATEs and refresh at once.
+`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. Classroom apps that predate it refetch their desktop on any `display_items`, `schedules` or `birthdays` change, so `set_screen_hidden` also touches one such row of the class (its schedule, else its birthdays, else its newest item) and they refresh at once too; newer ones also subscribe to `classrooms` UPDATEs.
 
 ## Teacher names
 

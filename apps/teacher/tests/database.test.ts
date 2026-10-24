@@ -410,7 +410,11 @@ describe('long notes, font sizes and hidden desktops', () => {
     await clearDisplay(); await show('note', { text: '隐藏后仍保留', color: 'pink' }, ['8-1', '8-2']);
     await identity(admin, 'admin');
     await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify([['math'], ['math'], ['math'], ['math'], ['math']]), '老师', null]);
+    const touched = "select xmin::text from schedules where classroom_id = '8-1'";
+    const before = await scalar<string>(touched);
     await db.query('select set_screen_hidden($1,true)', ['8-1']);
+    // Older classroom apps only refetch on a change they can see, so the class's schedule row is touched.
+    expect(await scalar<string>(touched)).not.toBe(before);
     expect(await scalar<Array<{ id: string; screen_hidden: boolean }>>("select classroom_status()->'classrooms'")).toContainEqual(expect.objectContaining({ id: '8-1', screen_hidden: true }));
     await identity(third);
     expect(await scalar('select display_state()')).toMatchObject({ items: [], schedule: null, birthdays: null });
