@@ -57,8 +57,9 @@ export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRem
   // Items that ended or were removed elsewhere drop out of the selection on their own.
   const selected = picked.filter(id => live.some(item => item.id === id));
   const chosen = live.filter(item => selected.includes(item.id));
-  // Only items showing the same thing, such as one board sent to several classes, can be edited together.
-  const editable = chosen.length > 0 && chosen.every(item => item.kind === chosen[0].kind && sameContent(item.content, chosen[0].content));
+  // Only items showing the same thing, or the classes of one item whose copies drifted apart before edits split them off, can be edited together.
+  const editable = chosen.length > 0 && chosen.every(item => item.kind === chosen[0].kind
+    && (item.request_id === chosen[0].request_id || sameContent(item.content, chosen[0].content)));
   const toggle = (ids: string[], on: boolean) => setPicked(old => on ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
   async function remove() { if (await onRemove(selected)) setPicked([]); }
   async function edit(content: object, endsAt: string) { if (await onEdit(selected, content, endsAt)) { setEditing(false); setPicked([]); } }

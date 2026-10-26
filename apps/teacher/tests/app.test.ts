@@ -191,6 +191,12 @@ it('edits items that show the same thing, and hides boards that have not appeare
   await click('选中全部 2 个班级');
   expect(host.querySelector('.selection-bar')?.textContent).toContain('编辑');
   await select('作业'); expect(host.querySelector('.selection-bar')?.textContent).not.toContain('编辑');
+  await select('作业'); await click('取消全部 2 个班级');
+  // Copies of one item that were edited apart before such edits split them off still edit together.
+  await act(async () => root.render(createElement(OnScreen, { items: [items[0], { ...reordered, content: { ...content, title: '旧通知' } }, ...items.slice(2)], rooms, classes: CLASSROOM_IDS,
+    known: false, now, ready: true, busy: '', onRemove: vi.fn(), onEdit, onCopy: vi.fn(), onError: vi.fn() })));
+  await click('选中全部 2 个班级'); expect(host.querySelector('.selection-bar')?.textContent).toContain('编辑');
+  await select('作业'); expect(host.querySelector('.selection-bar')?.textContent).not.toContain('编辑');
   await select('作业'); await click('编辑', host.querySelector('.selection-bar')!);
   const entry = document.querySelector<HTMLInputElement>('.edit-card [aria-label="第 1 条"]')!;
   expect(entry.value).toBe('带水杯');
