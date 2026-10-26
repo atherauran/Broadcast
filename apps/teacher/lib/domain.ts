@@ -147,6 +147,11 @@ export function patchDisplayItems(items: DisplayItem[], removal: boolean, row: P
   return [...rest, item as DisplayItem].sort((a, b) => a.classroom_id.localeCompare(b.classroom_id)
     || Date.parse(a.starts_at) - Date.parse(b.starts_at) || Date.parse(a.created_at) - Date.parse(b.created_at));
 }
+// The overview and realtime updates list content keys in different orders, so items are compared by value.
+const canonical = (value: unknown): string => Array.isArray(value) ? `[${value.map(canonical).join()}]`
+  : value && typeof value === 'object' ? `{${Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b)).map(([key, v]) => `${JSON.stringify(key)}:${canonical(v)}`).join()}}`
+  : JSON.stringify(value);
+export const sameContent = (a: object, b: object) => canonical(a) === canonical(b);
 // Length in characters as the server counts them, so an emoji is one.
 export const chars = (value: string) => Array.from(value.trim()).length;
 export function validAlert(body: string): boolean {

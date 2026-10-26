@@ -180,13 +180,15 @@ it('edits items that show the same thing, and hides boards that have not appeare
   const content = { title: '通知', entries: ['带水杯'], speak: false, voice_type: 101001, theme: 'plain' as const };
   const board = (id: string, classroom: string, start: number, title = content.title): DisplayItem => ({ id, request_id: id[0], classroom_id: classroom, kind: 'board',
     content: { ...content, title }, starts_at: at(start), ends_at: at(now + 3_600_000), teacher_name: '李老师', created_at: at(now) });
-  const items = [board('a1', '8-1', now), board('a2', '8-2', now), board('b', '8-1', now, '作业'), board('later', '8-2', now + 600_000, '明天的')];
+  // A realtime update lists the content keys in another order than the overview.
+  const reordered: DisplayItem = { ...board('a2', '8-2', now), kind: 'board', content: Object.fromEntries(Object.entries(content).reverse()) as typeof content };
+  const items = [board('a1', '8-1', now), reordered, board('b', '8-1', now, '作业'), board('later', '8-2', now + 600_000, '明天的')];
   await act(async () => root.render(createElement(OnScreen, { items, rooms, classes: CLASSROOM_IDS, known: false, now, ready: true, busy: '', onRemove: vi.fn(), onEdit, onCopy: vi.fn(), onError: vi.fn() })));
   const headings = () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-heading'));
   await act(async () => headings()[0].click()); await act(async () => headings()[1].click());
   expect(host.textContent).not.toContain('明天的');
   const select = (text: string, index = 0) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.screen-select')).filter(b => b.textContent?.includes(text))[index].click());
-  await select('通知'); await select('通知', 1);
+  await click('选中全部 2 个班级');
   expect(host.querySelector('.selection-bar')?.textContent).toContain('编辑');
   await select('作业'); expect(host.querySelector('.selection-bar')?.textContent).not.toContain('编辑');
   await select('作业'); await click('编辑', host.querySelector('.selection-bar')!);

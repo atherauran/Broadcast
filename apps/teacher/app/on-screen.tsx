@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Check, ChevronRight, ClipboardList, StickyNote, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { clockText, daysUntil, isOnline, remaining, upcoming, type Classroom, type DisplayItem } from '@/lib/domain';
+import { clockText, daysUntil, isOnline, remaining, sameContent, upcoming, type Classroom, type DisplayItem } from '@/lib/domain';
 import { roomStatus } from './class-picker';
 import { EditItem } from './edit-item';
 
@@ -58,7 +58,7 @@ export function OnScreen({ items, rooms, classes, known, now, ready, busy, onRem
   const selected = picked.filter(id => live.some(item => item.id === id));
   const chosen = live.filter(item => selected.includes(item.id));
   // Only items showing the same thing, such as one board sent to several classes, can be edited together.
-  const editable = chosen.length > 0 && chosen.every(item => item.kind === chosen[0].kind && JSON.stringify(item.content) === JSON.stringify(chosen[0].content));
+  const editable = chosen.length > 0 && chosen.every(item => item.kind === chosen[0].kind && sameContent(item.content, chosen[0].content));
   const toggle = (ids: string[], on: boolean) => setPicked(old => on ? [...new Set([...old, ...ids])] : old.filter(id => !ids.includes(id)));
   async function remove() { if (await onRemove(selected)) setPicked([]); }
   async function edit(content: object, endsAt: string) { if (await onEdit(selected, content, endsAt)) { setEditing(false); setPicked([]); } }
