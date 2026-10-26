@@ -294,6 +294,16 @@ describe('board drafts, scheduled boards and edits', () => {
     await expect(db.query('select delete_board_draft($1)', [id])).rejects.toThrow('管理员');
     await expect(db.query('select count(*) from board_drafts')).resolves.toMatchObject({ rows: [{ count: 0 }] });
   });
+  it('splits classes edited apart from the rest of their item', async () => {
+    await clearDisplay(); const id = await show('board', board, ['8-1', '8-2', '8-3']);
+    const ids = await Promise.all(['8-1', '8-2', '8-3'].map(room => rowId(id, room)));
+    const edit = (targets: string[]) => db.query('select update_display_items($1,$2,$3::timestamptz)', [targets, JSON.stringify({ ...board, entries: ['改了'] }), later(90)]);
+    const requests = async () => { await db.exec('reset role'); return (await db.query<{ request_id: string }>('select request_id from display_items where id = any($1) order by classroom_id', [ids])).rows.map(r => r.request_id); };
+    await identity(admin, 'admin'); await edit(ids.slice(1));
+    const [one, two, three] = await requests();
+    expect(one).toBe(id); expect(two).not.toBe(id); expect(three).toBe(two);
+    await identity(admin, 'admin'); await edit([ids[0]]); expect(await requests()).toEqual([id, two, two]);
+  });
 });
 describe('board themes and schedules', () => {
   it('defaults a board to the plain theme and validates the choice', async () => {
