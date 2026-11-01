@@ -86,3 +86,7 @@ See the [cloud setup guide](docs/SETUP.md), the [API contract](docs/CONTRACT.md)
 Automated tests use no real cloud accounts: Postgres rules run in the PGlite engine, the queue uses controllable speech and display fakes, and Avalonia layout is checked with headless rendering. Real cloud integration and Windows hardware and audio tests must be done after configuration.
 
 `.github/workflows/pages.yml` tests, builds and publishes the teacher app on each `main` update. Before the first publish, set GitHub Actions as the source in the repository's Pages settings.
+
+## License
+
+The code is released under the [MIT License](LICENSE). Bundled third-party assets keep their own terms: the national anthem recording (from gov.cn) and the PaddleOCR models and runtime in `apps/teacher/public/ocr` are not covered by this license.
