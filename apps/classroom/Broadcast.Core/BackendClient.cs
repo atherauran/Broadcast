@@ -12,7 +12,7 @@ public sealed class BackendException(string message, HttpStatusCode status) : Ex
 public sealed class SessionExpiredException() : Exception("设备登录已失效，请重新绑定");
 
 // Device sessions stay in memory: a restored disk would otherwise replay an already rotated refresh token.
-public sealed class BackendClient(ServiceConfig config, AuthSession? session = null, DeviceCredential? device = null) : IBackend, IDisposable
+public sealed class BackendClient(ServiceConfig config, AuthSession? session = null, DeviceCredential? device = null) : IBackend, IFileTransferBackend, IDisposable
 {
     // A broadcast is valid for only 30 seconds, so a stalled request gives up after 8; registering a device runs several steps and gets longer.
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(8), RegisterTimeout = TimeSpan.FromSeconds(30);
@@ -75,8 +75,33 @@ public sealed class BackendClient(ServiceConfig config, AuthSession? session = n
         await RequestAsync<T>("functions/v1/broadcast-api", input, await AccessTokenAsync(ct), ct, RegisterTimeout);
     public Task<PendingBatch> PendingAsync(CancellationToken ct) => RpcAsync<PendingBatch>("pending_broadcasts", new { }, ct);
     public Task<bool> ClaimAsync(Guid id, CancellationToken ct) => RpcAsync<bool>("start_delivery", new { p_delivery = id }, ct);
-    public Task AcknowledgeAsync(Receipt receipt, CancellationToken ct) =>
-        RpcAsync("ack_delivery", new { p_delivery = receipt.DeliveryId, p_event = receipt.Event, p_at = receipt.At, p_error = receipt.Error }, ct);
+    public Task AcknowledgeAsync(Receipt receipt, CancellationToken ct) => receipt.Kind == "file"
+        ? RpcAsync("ack_file_delivery", new { p_delivery = receipt.DeliveryId, p_event = receipt.Event, p_at = receipt.At, p_error = receipt.Error, p_saved_name = receipt.SavedName }, ct)
+        : RpcAsync("ack_delivery", new { p_delivery = receipt.DeliveryId, p_event = receipt.Event, p_at = receipt.At, p_error = receipt.Error }, ct);
+    public Task<FileTransferBatch> PendingFilesAsync(CancellationToken ct) => RpcAsync<FileTransferBatch>("pending_file_transfers", new { }, ct);
+    public async Task DownloadFileAsync(FileTransfer file, string destination, CancellationToken ct)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(TimeSpan.FromMinutes(5));
+        using var request = new HttpRequestMessage(HttpMethod.Get, Config.SupabaseUrl.TrimEnd('/') + "/storage/v1/object/authenticated/classroom-files/" + file.ObjectPath);
+        request.Headers.Add("apikey", Config.SupabaseAnonKey);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", await AccessTokenAsync(limit.Token));
+        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, limit.Token);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength is { } size && size != file.SizeBytes) throw new IOException("文件大小与发送记录不符");
+        await using var input = await response.Content.ReadAsStreamAsync(limit.Token);
+        await using var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
+        var buffer = new byte[81920];
+        long total = 0;
+        int count;
+        while ((count = await input.ReadAsync(buffer, limit.Token)) > 0)
+        {
+            total += count;
+            if (total > file.SizeBytes) throw new IOException("文件大小超出发送记录");
+            await output.WriteAsync(buffer.AsMemory(0, count), limit.Token);
+        }
+        if (total != file.SizeBytes) throw new IOException("文件下载不完整");
+    }
 
     private async Task<T> RequestAsync<T>(string path, object input, string? token, CancellationToken ct, TimeSpan? timeout = null) =>
         JsonSerializer.Deserialize<T>(await SendAsync(path, input, token, ct, timeout), Json.Options)!;

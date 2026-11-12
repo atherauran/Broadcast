@@ -28,6 +28,8 @@ var tests = new (string Name, Func<Task> Run)[]
     ("A board is read once, line by line, only near its start", BoardReadOnce),
     ("A fullscreen broadcast cuts off board reading", PrimaryPreempts),
     ("Display payloads keep long notes, font sizes and board order", DisplayPayload),
+    ("Files save without overwriting and survive receipt loss and restart", FileDownloads),
+    ("Files reject unsafe names, partial downloads and expired work", FileFailures),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -50,6 +52,63 @@ if (args.Contains("--realtime"))
     catch (Exception e) { failed++; Console.WriteLine("FAIL Void RPC: " + e.Message); }
 }
 return failed == 0 ? 0 : 1;
+
+static async Task FileDownloads()
+{
+    var folder = Path.Combine(Path.GetTempPath(), "broadcast-files-" + Guid.NewGuid());
+    var desktop = Path.Combine(folder, "desktop"); Directory.CreateDirectory(desktop);
+    try
+    {
+        await File.WriteAllTextAsync(Path.Combine(desktop, "资料.pdf"), "original");
+        var backend = new FakeFileBackend();
+        var transfer = Guid.NewGuid();
+        backend.Items = [new FileTransfer(Guid.NewGuid(), transfer, "资料.pdf", 3, transfer + "/file", DateTimeOffset.UtcNow.AddHours(1))];
+        var receiptPath = Path.Combine(folder, "receipts.json");
+        var state = Path.Combine(folder, "state");
+        var outbox = new ReceiptOutbox(receiptPath);
+        var receiver = new FileTransferReceiver(backend, outbox, new ServerClock(), desktop, state);
+        await receiver.SyncAsync(default);
+        Check(await File.ReadAllTextAsync(Path.Combine(desktop, "资料.pdf")) == "original");
+        Check(await File.ReadAllTextAsync(Path.Combine(desktop, "资料 (1).pdf")) == "abc");
+        Check(backend.Downloads == 1);
+        var receipts = new FakeBackend();
+        await new ReceiptOutbox(receiptPath).FlushAsync(receipts, default);
+        Check(receipts.Receipts.Select(r => r.Event).SequenceEqual(new[] { "received", "downloaded" }));
+        Check(receipts.Receipts.All(r => r.Kind == "file") && receipts.Receipts.Last().SavedName == "资料 (1).pdf");
+        // Simulate a server still returning this delivery after a lost receipt, with no pending local outbox.
+        var restarted = new FileTransferReceiver(backend, new ReceiptOutbox(receiptPath), new ServerClock(), desktop, state);
+        await restarted.SyncAsync(default);
+        Check(backend.Downloads == 1 && Directory.GetFiles(desktop).Length == 2);
+    }
+    finally { Directory.Delete(folder, true); }
+}
+static async Task FileFailures()
+{
+    var folder = Path.Combine(Path.GetTempPath(), "broadcast-files-" + Guid.NewGuid()); Directory.CreateDirectory(folder);
+    try
+    {
+        var transfer = Guid.NewGuid();
+        var file = new FileTransfer(Guid.NewGuid(), transfer, "ok.pdf", 3, transfer + "/file", DateTimeOffset.UtcNow.AddHours(1));
+        foreach (var name in new[] { "../escape", "CON.txt", "LPT¹.txt", "file.", "file:ads" })
+        {
+            try { FileTransferReceiver.Validate(file with { Filename = name }); throw new Exception("Unsafe filename accepted"); }
+            catch (IOException) { }
+        }
+        var backend = new FakeFileBackend { Items = [file], Content = "a" };
+        var receipts = new FakeBackend();
+        var outbox = new ReceiptOutbox(Path.Combine(folder, "receipts.json"));
+        var desktop = Path.Combine(folder, "desktop");
+        var receiver = new FileTransferReceiver(backend, outbox, new ServerClock(), desktop, Path.Combine(folder, "state"));
+        await receiver.SyncAsync(default);
+        Check(Directory.GetFiles(desktop).Length == 0, "Partial download reached the desktop");
+        await outbox.FlushAsync(receipts, default);
+        Check(receipts.Receipts.Any(r => r.Event == "failed") && !receipts.Receipts.Any(r => r.Event == "downloaded"));
+        backend.Items = [file with { DeliveryId = Guid.NewGuid(), ExpiresAt = DateTimeOffset.UtcNow.AddSeconds(-1) }];
+        await receiver.SyncAsync(default);
+        Check(backend.Downloads == 1, "Expired file was downloaded");
+    }
+    finally { Directory.Delete(folder, true); }
+}
 
 static async Task RefreshSmoke(bool invalid)
 {
@@ -91,7 +150,7 @@ static async Task RealtimeSmoke()
         new AuthSession("fixture-access-token", "fixture-refresh-token", DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds(),
             new AuthUser("20000000-0000-4000-8000-000000000001", [])));
     using var life = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-    var changes = 0; var beats = 0; var displayChanges = 0;
+    var changes = 0; var beats = 0; var displayChanges = 0; var fileChanges = 0;
     // 50 ms keepalives: the status heartbeat fires every 6th and the missed-broadcast check every 2nd.
     try
     {
@@ -100,12 +159,13 @@ static async Task RealtimeSmoke()
             var result = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, ct);
             Check(result.Active && result.ClassroomId == "8-1");
             if (++beats == 3) life.Cancel();
-        }, life.Token);
+        }, life.Token, () => fileChanges++);
     }
     catch (OperationCanceledException) when (beats == 3) { }
     // beats: 1 on join + 1 per 6 keepalives; changes: 1 on join + 1 per 2 keepalives.
     Check(beats == 3 && changes >= 1 + 3 * (beats - 1), "Subscription/heartbeat did not confirm readiness");
     Check(displayChanges == 2, "Display item and schedule changes were not routed separately");
+    Check(fileChanges == 1, "File delivery changes were not routed separately");
     using var http = new HttpClient();
     var stats = await http.GetFromJsonAsync<JsonElement>("http://127.0.0.1:54329/stats");
     Check(stats.GetProperty("keepalives").GetInt32() >= 12, "Keepalives were not sent on the fast cycle");
@@ -431,4 +491,14 @@ sealed class FakeSpeech : ISpeechSynthesizer
     { Interlocked.Increment(ref Calls); VoiceTypes.Enqueue(voiceType); return Fail
         ? Task.FromException<byte[]>(new InvalidOperationException("tts failed"))
         : Task.FromResult(new byte[] { 1 }); }
+}
+
+sealed class FakeFileBackend : IFileTransferBackend
+{
+    public FileTransfer[] Items = [];
+    public string Content = "abc";
+    public int Downloads;
+    public Task<FileTransferBatch> PendingFilesAsync(CancellationToken ct) => Task.FromResult(new FileTransferBatch(DateTimeOffset.UtcNow, Items));
+    public async Task DownloadFileAsync(FileTransfer file, string destination, CancellationToken ct)
+    { Downloads++; await File.WriteAllTextAsync(destination, Content, ct); }
 }

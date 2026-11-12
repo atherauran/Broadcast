@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { BirthdayList, BoardDraftRow, Broadcast, Classroom, DisplayItem, Feedback, Schedule } from './domain';
+import { fileError, type FileTransfer } from './files';
 export const configured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const supabase = configured ? createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY) : null;
 export const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'admin@broadcast.local';
@@ -13,6 +14,25 @@ export async function rpc<T>(name: string, args: Record<string, unknown> = {}): 
 export const getClassrooms = () => rpc<{ server_now: string; classrooms: Classroom[] }>('classroom_status');
 export const getHistory = (before: string | null = null, id: string | null = null) =>
   rpc<Broadcast[]>('broadcast_history', { p_before: before, p_id: id });
+export const getFileHistory = (before: string | null = null, id: string | null = null) => rpc<FileTransfer[]>('file_transfer_history', { p_before: before, p_id: id });
+export async function sendFile(file: File, classrooms: string[], teacher: string) {
+  const invalid = fileError(file);
+  if (invalid) throw new Error(invalid);
+  if (!supabase) throw new Error('广播服务尚未配置');
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer())), b => b.toString(16).padStart(2, '0')).join('');
+  return once('file-transfer-attempt', [file.name, file.size, hash, classrooms, teacher], async id => {
+    const prepared = await rpc<{ path: string; sent: boolean; uploaded: boolean }>('prepare_file_transfer', { p_id: id, p_filename: file.name, p_size: file.size, p_classrooms: classrooms, p_teacher_name: teacher });
+    if (prepared.sent) return id;
+    if (!prepared.uploaded) {
+      const { error } = await supabase!.storage.from('classroom-files').upload(prepared.path, file, { contentType: 'application/octet-stream', upsert: false });
+      if (error) throw new Error(error.message);
+    }
+    return rpc<string>('send_file_transfer', { p_id: id });
+  }).catch(error => {
+    if (error instanceof Error && error.message.includes('上传已过期')) localStorage.removeItem('file-transfer-attempt');
+    throw error;
+  });
+}
 export async function getSchedules(): Promise<Schedule[]> {
   if (!supabase) throw new Error('广播服务尚未配置');
   const { data, error } = await supabase.from('schedules').select('classroom_id, days, duties, teacher_name, updated_at');

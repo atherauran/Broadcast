@@ -93,3 +93,24 @@ Receipts and online status are shown separately. The 30-second validity limits o
 ## Rollout order
 
 Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items. The schedules migration must be applied before the new classroom app ships, because its Realtime join includes the `schedules` table; older classroom apps ignore schedules, board themes, the flag button and birthdays. The birthdays migration must likewise be applied before the new classroom app ships, because its Realtime join includes the `birthdays` table.
+
+## File transfers
+
+File transfers are separate from broadcasts and display items. `file_transfers` stores the original Windows-compatible filename, byte size, target classes, teacher, immutable object path (`<request UUID>/file`), creation/send/expiry times and `deleted_at`. `file_deliveries` stores one row per target, bound to the device at send time, with `received_at`, `downloaded_at`, `failed_at`, `saved_name` and `error`. Rebinding a classroom does not give its new device an earlier file.
+
+Teacher RPCs (admin only):
+
+- `prepare_file_transfer(p_id, p_filename, p_size, p_classrooms, p_teacher_name)` reserves a request and returns `{path, uploaded, sent}`. Retries reuse the reservation and any completed upload. Files must be 1 byte–20 MiB, with at most 200 MiB of outstanding reservations/stored files. Windows-invalid filenames are rejected. Upload the bytes directly to the private `classroom-files` bucket with the teacher JWT and `upsert: false`.
+- `send_file_transfer(p_id)` checks that the uploaded object has the reserved size and all target classes are bound, then creates the deliveries atomically. Offline bound devices are allowed. Repeated calls return the same ID. Downloads are valid for 24 hours after sending.
+- `file_transfer_history(p_before = null, p_id = null)` returns up to 20 sent transfers, newest first, with nested deliveries. An ID fetch refreshes an individual record after a Realtime update.
+
+Device RPCs:
+
+- `pending_file_transfers()` returns `{server_now, items}` with `delivery_id`, `transfer_id`, `filename`, `size_bytes`, `object_path` and `expires_at`, restricted to unfinished transfers assigned to the currently bound device/class.
+- `ack_file_delivery(p_delivery, p_event, p_at, p_error = null, p_saved_name = null)` records `received`, `downloaded` or `failed`. Terminal results cannot replace each other. A downloaded receipt requires the saved filename. Device/time checks match broadcast receipts.
+
+Storage INSERT is restricted to an admin's own unpublished reservation, less than one hour old. There is no client UPDATE or DELETE policy. Storage SELECT requires an active, unfinished transfer assigned to the authenticated device's current classroom. Neither public objects nor signed public download links are used.
+
+The classroom subscribes to `file_deliveries` INSERTs on its existing Realtime connection and rechecks on reconnect/every 40 seconds. Downloads run separately from announcements. The file streams to a temporary desktop file (maximum declared size, five-minute timeout), is length-checked, and moves to the final desktop filename without overwriting. Existing names gain `(1)`, `(2)`, etc. A local per-delivery destination/completion marker and the existing durable receipt outbox prevent duplicate copies after a lost receipt or process restart. The client never opens a received file. A download failure is terminal and shown to the teacher; sending the file again creates a new transfer.
+
+Every 15 minutes, `pg_cron`/`pg_net` invoke `broadcast-api` with a dedicated random token kept in Vault. The service-role-only `file_cleanup_candidates` RPC verifies this token, marks transfers unavailable when expired, abandoned for one hour, or terminal for every target, and returns up to 100 eligible Storage paths. The Edge Function deletes them through the Storage API, which removes the actual bytes as well as their metadata. Failed deletion remains eligible for the next run; orphaned and late-finishing uploads are covered too. Transfer/receipt history stays in Postgres. The cleanup migration's function URL must match the deployed project when reproducing this setup elsewhere.

@@ -12,7 +12,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
     private const int RecheckEvery = 2;   // every 40 seconds, so a missed notification is recovered while a 30-second broadcast may still be valid
     private const int StatusEvery = 6;    // every 120 seconds
 
-    public async Task RunAsync(Action changed, Action displayChanged, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct)
+    public async Task RunAsync(Action changed, Action displayChanged, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct, Action? filesChanged = null)
     {
         using var life = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var socket = new ClientWebSocket();
@@ -34,6 +34,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
                     // Display items, schedules, birthdays and the classroom row carry no filter: RLS already limits them to this device's classroom.
                     postgres_changes = new object[] {
                         new { @event = "INSERT", schema = "public", table = "deliveries", filter = "device_id=eq." + backend.Session.User.Id },
+                        new { @event = "INSERT", schema = "public", table = "file_deliveries", filter = "device_id=eq." + backend.Session.User.Id },
                         new { @event = "*", schema = "public", table = "display_items" },
                         new { @event = "*", schema = "public", table = "schedules" },
                         new { @event = "*", schema = "public", table = "birthdays" },
@@ -109,6 +110,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
                     if (kind == "postgres_changes")
                     {
                         if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("table", out var table) && table.GetString() is "display_items" or "schedules" or "birthdays" or "classrooms") displayChanged();
+                        else if (payload.TryGetProperty("data", out var fileData) && fileData.TryGetProperty("table", out var fileTable) && fileTable.GetString() == "file_deliveries") filesChanged?.Invoke();
                         else changed();
                     }
                 }

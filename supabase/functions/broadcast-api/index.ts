@@ -16,6 +16,17 @@ Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
   if (request.method !== 'POST') return reply({ error: '仅支持 POST' }, 405);
   try {
+    const cleanupToken = request.headers.get('x-file-cleanup-token');
+    if (cleanupToken) {
+      const { data: paths, error } = await service.rpc('file_cleanup_candidates', { p_token: cleanupToken });
+      if (error) return reply({ error: '无权清理文件' }, 403);
+      if (paths?.length) {
+        // Storage's API removes both the bytes and metadata; SQL deletion alone leaks stored files.
+        const { error: removalError } = await service.storage.from('classroom-files').remove(paths);
+        if (removalError) throw removalError;
+      }
+      return reply({ deleted: paths?.length ?? 0 });
+    }
     const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
     if (!token) return reply({ error: '请先登录' }, 401);
     const { data: { user }, error: authError } = await service.auth.getUser(token);

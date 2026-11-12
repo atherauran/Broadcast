@@ -86,3 +86,7 @@ See the [cloud setup guide](docs/SETUP.md), the [API contract](docs/CONTRACT.md)
 Automated tests use no real cloud accounts: Postgres rules run in the PGlite engine, the queue uses controllable speech and display fakes, and Avalonia layout is checked with headless rendering. Real cloud integration and Windows hardware and audio tests must be done after configuration.
 
 `.github/workflows/pages.yml` tests, builds and publishes the teacher app on each `main` update. Before the first publish, set GitHub Actions as the source in the repository's Pages settings.
+
+## File transfers
+
+The separate 文件传输 tab sends one file (up to 20 MiB) to selected, bound classrooms. Windows saves it to the current user's desktop without opening it or interrupting announcements; existing filenames are preserved with numbered copies. Transfer history shows per-class download results. The private Supabase Storage bucket holds at most 200 MiB of outstanding reservations/stored transfer files; files are available for 24 hours, and a scheduled job cleans up expired, abandoned and all-terminal transfers every 15 minutes. Deploy the file-transfer/cleanup migrations and updated `broadcast-api` before updating the teacher and classroom apps. See `docs/CONTRACT.md` for the APIs and `docs/WINDOWS-GUIDE.md` for a manual test.

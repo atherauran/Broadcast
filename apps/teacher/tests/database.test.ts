@@ -36,6 +36,19 @@ beforeAll(async () => {
   db = new PGlite();
   await db.exec(`create role anon; create role authenticated; create role service_role bypassrls;
     create schema auth;
+    create schema storage;
+    create schema vault;
+    create schema cron;
+    create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint);
+    create table storage.objects(id uuid default gen_random_uuid(), bucket_id text, name text, metadata jsonb, created_at timestamptz default clock_timestamp());
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to authenticated, service_role;
+    grant select, insert on storage.objects to authenticated;
+    grant all on storage.objects to service_role;
+    create table vault.decrypted_secrets(name text, decrypted_secret text);
+    create function vault.create_secret(secret text, name text) returns uuid language sql as $$insert into vault.decrypted_secrets values(name, secret) returning gen_random_uuid()$$;
+    create table cron.jobs(name text primary key, schedule text, command text);
+    create function cron.schedule(name text, schedule text, command text) returns bigint language sql as $$insert into cron.jobs values(name, schedule, command) on conflict(name) do update set schedule=excluded.schedule, command=excluded.command returning 1::bigint$$;
     create table auth.users(id uuid primary key);
     create function auth.jwt() returns jsonb language sql stable as $$select nullif(current_setting('request.jwt.claims', true), '')::jsonb$$;
     create function auth.uid() returns uuid language sql stable as $$select (auth.jwt()->>'sub')::uuid$$;
@@ -45,7 +58,8 @@ beforeAll(async () => {
     insert into auth.users values ('${admin}'),('${first}'),('${second}'),('${third}');`);
   const migrations = new URL('../../../supabase/migrations/', import.meta.url);
   for (const file of (await readdir(migrations)).filter(name => name.endsWith('.sql')).sort())
-    await db.exec(await readFile(new URL(file, migrations), 'utf8'));
+    // PGlite runs the real schema/RLS/functions; hosted scheduling extensions are represented above.
+    await db.exec((await readFile(new URL(file, migrations), 'utf8')).replace(/^create extension if not exists (pg_cron|pg_net).*;$/gm, ''));
   await identity(admin, 'admin');
   await db.query('select bind_device($1,$2,$3)', [first, '8-1', 'classroom-one']);
   await db.query('select bind_device($1,$2,$3)', [second, '8-2', 'classroom-two']);
@@ -436,5 +450,85 @@ describe('long notes, font sizes and hidden desktops', () => {
   });
   it('lets an unbound device read an empty screen', async () => {
     await identity(first); expect(await scalar('select display_state()')).toMatchObject({ items: [], schedule: null });
+  });
+});
+
+describe('file transfers', () => {
+  async function prepare(targets = ['8-1', '8-2'], filename = '课堂资料.pdf', size = 123) {
+    const id = crypto.randomUUID();
+    await identity(admin, 'admin');
+    const { path } = await scalar<{ path: string }>('select prepare_file_transfer($1,$2,$3,$4,$5)', [id, filename, size, targets, '王老师']);
+    return { id, path };
+  }
+  async function upload(path: string, size = 123) {
+    await db.query("insert into storage.objects(bucket_id,name,metadata) values('classroom-files',$1,$2)", [path, JSON.stringify({ size })]);
+  }
+  async function sent() {
+    const f = await prepare(); await upload(f.path);
+    await db.query('select send_file_transfer($1)', [f.id]);
+    return f;
+  }
+  it('enforces size, Windows filenames, classes, permissions and immutable requests', async () => {
+    for (const name of ['../bad.pdf', 'CON.txt', 'LPT¹.txt', 'file.', 'bad:name']) await expect(prepare(['8-1'], name)).rejects.toThrow('文件名');
+    await expect(prepare(['8-1'], 'empty.pdf', 0)).rejects.toThrow('大小');
+    await expect(prepare(['8-1'], 'big.pdf', 20971521)).rejects.toThrow('大小');
+    await expect(prepare(['8-1', '8-1'])).rejects.toThrow('班级');
+    const f = await prepare();
+    await expect(db.query('select send_file_transfer($1)', [f.id])).rejects.toThrow('尚未上传');
+    await expect(db.query('select prepare_file_transfer($1,$2,123,$3,$4)', [f.id, 'different.pdf', ['8-1','8-2'], '王老师'])).rejects.toThrow('冲突');
+    await identity(second);
+    await expect(db.query('select prepare_file_transfer($1,$2,123,$3,$4)', [crypto.randomUUID(), 'a.pdf', ['8-2'], '伪造'])).rejects.toThrow('管理员');
+    await expect(upload(f.path)).rejects.toThrow('row-level security');
+  });
+  it('publishes once and authorizes only the bound target devices to download', async () => {
+    const f = await sent();
+    await db.query('select send_file_transfer($1)', [f.id]);
+    expect(await scalar<number>('select count(*)::int from file_deliveries where transfer_id=$1', [f.id])).toBe(2);
+    expect(await scalar<number>('select extract(epoch from expires_at-sent_at)::int from file_transfers where id=$1', [f.id])).toBe(86400);
+    await identity(second);
+    const batch = await scalar<{ items: { transfer_id: string; object_path: string }[] }>('select pending_file_transfers()');
+    expect(batch.items).toContainEqual(expect.objectContaining({ transfer_id: f.id, object_path: f.path }));
+    expect(await scalar<number>("select count(*)::int from storage.objects where name=$1", [f.path])).toBe(1);
+    await identity(first); // The old device no longer owns 8-1.
+    expect(await scalar('select pending_file_transfers()')).toMatchObject({ items: [] });
+    expect(await scalar<number>('select count(*)::int from storage.objects where name=$1', [f.path])).toBe(0);
+    await identity(second);
+    const delivery = await scalar<string>('select id from file_deliveries where transfer_id=$1', [f.id]);
+    await db.query("select ack_file_delivery($1,'downloaded',clock_timestamp(),null,'课堂资料.pdf')", [delivery]);
+    await db.query("select ack_file_delivery($1,'failed',clock_timestamp(),'late failure')", [delivery]);
+    expect(await scalar('select downloaded_at is not null and failed_at is null from file_deliveries where id=$1', [delivery])).toBe(true);
+    expect(await scalar('select can_download_classroom_file($1)', [f.path])).toBe(false);
+    await identity(third);
+    await expect(db.query("select ack_file_delivery($1,'downloaded',clock_timestamp(),null,'forged.pdf')", [delivery])).rejects.toThrow('无权');
+  });
+  it('cleans terminal, expired, abandoned and orphaned objects but keeps pending downloads', async () => {
+    const pending = await sent();
+    const done = await sent();
+    const expired = await sent();
+    const abandoned = await prepare(); await upload(abandoned.path);
+    await db.exec('reset role');
+    await db.query("update file_deliveries set downloaded_at=clock_timestamp() where transfer_id=$1", [done.id]);
+    await db.query("update file_transfers set expires_at=clock_timestamp()-interval '1 second' where id=$1", [expired.id]);
+    await db.query("update file_transfers set created_at=clock_timestamp()-interval '2 hours' where id=$1", [abandoned.id]);
+    await db.query("insert into storage.objects(bucket_id,name,created_at) values('classroom-files','orphan',clock_timestamp()-interval '2 hours')");
+    await expect(db.query("select file_cleanup_candidates('wrong')")).rejects.toThrow('无权');
+    const token = await scalar<string>("select decrypted_secret from vault.decrypted_secrets where name='file_cleanup_token'");
+    const paths = await scalar<string[]>('select file_cleanup_candidates($1)', [token]);
+    expect(paths).toEqual(expect.arrayContaining([done.path, expired.path, abandoned.path, 'orphan']));
+    expect(paths).not.toContain(pending.path);
+    // Failed Storage removal remains eligible on the next run.
+    expect(await scalar<string[]>('select file_cleanup_candidates($1)', [token])).toEqual(paths);
+    expect(await scalar<number>("select count(*)::int from cron.jobs where name='cleanup-classroom-files' and schedule='*/15 * * * *'")).toBe(1);
+    expect(await scalar<string>("select command from cron.jobs where name='cleanup-classroom-files'")).toContain('timeout_milliseconds := 60000');
+    await identity(admin, 'admin');
+    await expect(db.query('select file_cleanup_candidates($1)', [token])).rejects.toThrow('permission denied');
+  });
+  it('caps concurrent reservations at 200 MB and checks the actual uploaded size', async () => {
+    const f = await prepare(); await upload(f.path, 124);
+    await expect(db.query('select send_file_transfer($1)', [f.id])).rejects.toThrow('尚未上传');
+    await db.exec('reset role');
+    await db.exec("update file_transfers set deleted_at=clock_timestamp(); delete from storage.objects");
+    for (let i = 0; i < 10; i++) await prepare(['8-1'], `f${i}.pdf`, 20971520);
+    await expect(prepare()).rejects.toThrow('200 MB');
   });
 });

@@ -9,6 +9,10 @@ public sealed class ReceiptOutbox
     private readonly object _lock = new();
     private readonly SemaphoreSlim _flush = new(1, 1);
     public event Action? Changed;
+    public bool HasFileResult(Guid deliveryId)
+    {
+        lock (_lock) return _pending.Any(r => r.Kind == "file" && r.DeliveryId == deliveryId && r.Event is "downloaded" or "failed");
+    }
     public ReceiptOutbox(string path)
     {
         _path = path;
@@ -19,7 +23,7 @@ public sealed class ReceiptOutbox
     {
         lock (_lock)
         {
-            if (_pending.Any(r => r.DeliveryId == receipt.DeliveryId && r.Event == receipt.Event)) return;
+            if (_pending.Any(r => r.DeliveryId == receipt.DeliveryId && r.Event == receipt.Event && r.Kind == receipt.Kind)) return;
             _pending.Add(receipt); Save();
         }
         Changed?.Invoke();

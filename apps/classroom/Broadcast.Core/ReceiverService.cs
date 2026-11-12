@@ -2,11 +2,12 @@ namespace Broadcast.Core;
 
 public sealed class BindingRevokedException() : Exception("设备已解绑，请重新设置");
 
-public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, ReceiptOutbox outbox, ServerClock clock, DisplayState display)
+public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, ReceiptOutbox outbox, ServerClock clock, DisplayState display, FileTransferReceiver files)
 {
     private readonly SemaphoreSlim _work = new(0, 1);
     private readonly SemaphoreSlim _flushWork = new(0, 1);
     private readonly SemaphoreSlim _displayWork = new(0, 1);
+    private readonly SemaphoreSlim _fileWork = new(0, 1);
     public event Action<string>? StatusChanged;
     public event Action? BindingRevoked;
     public event Action<Exception>? Error;
@@ -20,6 +21,8 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         var flushing = FlushLoop(life.Token);
         var showing = display.RunAsync(life.Token);
         var displaySyncing = DisplayLoop(life.Token);
+        files.Error += Report;
+        var fileSyncing = FileLoop(life.Token);
         try
         {
             var attempt = 0;
@@ -36,7 +39,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
                         if (state.Display is not null) await display.UpdateAsync(state.Display, state.Schedule, state.Birthdays, token);
                         attempt = 0;
                         StatusChanged?.Invoke(state.ClassroomId + " · 在线");
-                    }, life.Token);
+                    }, life.Token, SignalFiles);
                 }
                 catch (Exception e) when (e is BindingRevokedException or SessionExpiredException
                     or BackendException { Status: System.Net.HttpStatusCode.Unauthorized })
@@ -52,8 +55,9 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         finally
         {
             outbox.Changed -= SignalFlush; queue.Error -= Report;
+            files.Error -= Report;
             await life.CancelAsync();
-            try { await Task.WhenAll(playback, syncing, flushing, showing, displaySyncing); } catch (OperationCanceledException) { }
+            try { await Task.WhenAll(playback, syncing, flushing, showing, displaySyncing, fileSyncing); } catch (OperationCanceledException) { }
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try { await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = false }, timeout.Token); } catch (Exception) { }
         }
@@ -62,9 +66,20 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
     private void Signal() { lock (_work) if (_work.CurrentCount == 0) _work.Release(); }
     private void SignalFlush() { lock (_flushWork) if (_flushWork.CurrentCount == 0) _flushWork.Release(); }
     // A Realtime notification or periodic check looks for new broadcasts and also retries stuck receipts.
-    private void SignalAll() { Signal(); SignalFlush(); }
+    private void SignalAll() { Signal(); SignalFlush(); SignalFiles(); }
+    private void SignalFiles() { lock (_fileWork) if (_fileWork.CurrentCount == 0) _fileWork.Release(); }
     private void SignalDisplay() { lock (_displayWork) if (_displayWork.CurrentCount == 0) _displayWork.Release(); }
     private void Report(Exception e) => Error?.Invoke(e);
+    private async Task FileLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await _fileWork.WaitAsync(ct);
+            try { await files.SyncAsync(ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
+            catch (Exception e) { Report(e); }
+        }
+    }
     private async Task SyncLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)

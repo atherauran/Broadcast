@@ -49,7 +49,7 @@ public sealed record DaySchedule(DateOnly Date, string[] Periods);
 // Date is "MM-DD"; a celebration is one birthday greeted today, On being the birthday itself (a weekend day when greeted on Friday).
 public sealed record Birthday(string Name, string Date);
 public sealed record Celebration(string Name, DateOnly On);
-public sealed record Receipt(Guid DeliveryId, string Event, DateTimeOffset At, string? Error = null);
+public sealed record Receipt(Guid DeliveryId, string Event, DateTimeOffset At, string? Error = null, string Kind = "broadcast", string? SavedName = null);
 
 public sealed class ServerClock
 {

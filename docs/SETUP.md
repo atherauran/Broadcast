@@ -73,3 +73,9 @@ Fill in the distribution package's `appsettings.json`:
 No EXE rebuild is needed. The file contains Tencent Cloud keys, so restrict read access to the program directory. The repository's `appsettings.json` is a safe template without keys; for local publishing, keep the full config in the ignored `appsettings.local.json`, which `scripts/publish-windows.sh` uses as the package's `appsettings.json`. After launch, pick a class; an admin can unbind a dead PC from the teacher app's device management.
 
 For the first integration test, use at least one Windows x64 PC and complete receive, display, playback and history receipts with real Tencent Cloud audio.
+
+## File transfers
+
+Apply `20261110091904_file_transfers.sql`, `20261110091908_file_transfer_cleanup.sql` and `20261110093311_file_cleanup_timeout.sql`, then redeploy `broadcast-api` before using the new teacher and classroom apps. The migrations create the private `classroom-files` bucket (20 MiB per object), enable `pg_cron` and `pg_net`, generate a dedicated cleanup token in Supabase Vault, and schedule Storage cleanup every 15 minutes. No service key or cleanup token belongs in either client. For a different project, change the cleanup migration's function URL before applying it.
+
+The feature caps outstanding reservations/stored transfer files at 200 MiB and keeps a sent file available for 24 hours. All-terminal transfers and abandoned uploads are removed sooner. This limits temporary storage; normal Supabase bandwidth quotas still apply to each classroom download. Check the `cleanup-classroom-files` Cron job and its HTTP response when diagnosing cleanup errors.

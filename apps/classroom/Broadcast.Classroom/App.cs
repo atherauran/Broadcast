@@ -89,7 +89,9 @@ public sealed class App : Application
         screen.Error += LocalState.Log;
         var display = new DisplayState(screen, clock, reader);
         display.Error += LocalState.Log;
-        var receiver = new ReceiverService(_backend, queue, outbox, clock, display);
+        var files = new FileTransferReceiver(_backend, outbox, clock, Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Path.Combine(LocalState.Folder, "files-" + device.Id));
+        var receiver = new ReceiverService(_backend, queue, outbox, clock, display, files);
         receiver.StatusChanged += state => Dispatcher.UIThread.Post(() => { if (_tray is not null) _tray.ToolTipText = "校园广播 · " + state; });
         receiver.Error += LocalState.Log;
         receiver.BindingRevoked += () => Dispatcher.UIThread.Post(async () => await TransitionAsync(async () =>

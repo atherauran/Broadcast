@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
+import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, FileUp, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getHistory, getOverview, getSchedules, maintainerEmail, once, rpc, supabase } from '@/lib/api';
+import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getOverview, getSchedules, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
+import type { FileTransfer } from '@/lib/files';
 import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
   type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Timetable } from '@/lib/domain';
@@ -18,6 +19,7 @@ import { Devices } from './devices';
 import { BirthdayEditor, type BirthdayRow } from './birthdays';
 import { ScheduleEditor } from './schedule';
 import { FeedbackDialog, FeedbackNews } from './feedback';
+import { Files } from './files';
 
 const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
@@ -44,6 +46,8 @@ export default function App() {
   const [drafts, setDrafts] = useState<Drafts>(initialDrafts);
   const [history, setHistory] = useState<Broadcast[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  const [fileHistory, setFileHistory] = useState<FileTransfer[]>([]);
+  const [moreFiles, setMoreFiles] = useState(false);
   const [overview, setOverview] = useState<DisplayItem[]>([]);
   const [boardDrafts, setBoardDrafts] = useState<BoardDraftRow[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -54,7 +58,7 @@ export default function App() {
   const [feedbackOpen, setFeedbackOpen] = useState<{ focus: string | null } | null>(null);
   const [seenMap, setSeenMap] = useState(readSeen);
   const [intro, setIntro] = useState(() => !localStorage.getItem(introKey));
-  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'schedule' | 'birthdays' | 'devices'>('send');
+  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'files' | 'schedule' | 'birthdays' | 'devices'>('send');
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -116,6 +120,11 @@ export default function App() {
     sync(result.server_now); setRooms(result.classrooms);
   }, [sync]);
   const refreshFeedback = useCallback(async () => setFeedback(await getFeedback()), []);
+  const refreshFiles = useCallback(async (id: string | null = null) => {
+    const items = await getFileHistory(null, id);
+    setFileHistory(old => [...new Map([...old, ...items].map(item => [item.id, item])).values()].sort((a, b) => b.created_at.localeCompare(a.created_at)));
+    if (!id) setMoreFiles(items.length === 20);
+  }, []);
   const refreshOverview = useCallback(async () => {
     const result = await getOverview();
     sync(result.server_now); setOverview(result.items);
@@ -128,11 +137,13 @@ export default function App() {
     const load = async () => {
       try {
         await refreshRooms();
-        const [items, weeks, saved, lists, tickets] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), getFeedback(), refreshOverview()]);
+        const [items, weeks, saved, lists, tickets] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), getFeedback(), refreshOverview(), refreshFiles()]);
         if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); setBirthdays(lists); setFeedback(tickets); }
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'file_transfers' }, payload => { void refreshFiles((payload.new as { id: string }).id).catch(e => setError(message(e))); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'file_deliveries' }, payload => { void refreshFiles((payload.new as { transfer_id: string }).transfer_id).catch(e => setError(message(e))); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'devices' }, payload => {
         if (payload.eventType !== 'DELETE') setRooms(old => patchRoom(old, payload.new as Parameters<typeof patchRoom>[1]));
       })
@@ -180,7 +191,7 @@ export default function App() {
     };
     document.addEventListener('visibilitychange', resume);
     return () => { disposed = true; document.removeEventListener('visibilitychange', resume); void supabase!.removeChannel(channel); };
-  }, [userId, network, refreshRooms, refreshOverview, refreshFeedback, mergeHistory]);
+  }, [userId, network, refreshRooms, refreshOverview, refreshFeedback, refreshFiles, mergeHistory]);
   useEffect(() => { localStorage.setItem('broadcast-draft', drafts.alert.body); }, [drafts.alert.body]);
   const patch: Patch = useCallback((key, change) => setDrafts(old => ({ ...old, [key]: { ...old[key], ...change } })), []);
 
@@ -374,6 +385,7 @@ export default function App() {
         <button className={tab === 'send' ? 'active' : ''} onClick={() => setTab('send')}><AudioLines size={19} />发布</button>
         <button className={tab === 'screen' ? 'active' : ''} onClick={() => setTab('screen')}><MonitorPlay size={18} />正在显示</button>
         <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><Clock3 size={18} />广播历史</button>
+        <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}><FileUp size={18} />文件传输</button>
         <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}><CalendarDays size={18} />课表/值日</button>
         <button className={tab === 'birthdays' ? 'active' : ''} onClick={() => setTab('birthdays')}><Cake size={18} />生日</button>
       </nav>
@@ -418,6 +430,16 @@ export default function App() {
       {tab === 'history' && <History history={visibleHistory} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
         onResend={resend} rooms={visibleRooms} known={known} now={now} configured={configured} />}
+      {tab === 'files' && <Files rooms={visibleRooms} known={known} now={now} ready={ready} busy={busy} onError={setError}
+        history={fileHistory.map(item => ({ ...item, deliveries: item.deliveries.filter(d => shown(d.classroom_id)) })).filter(item => item.deliveries.length)}
+        hasMore={moreFiles} onMore={() => void run('file-history', async () => {
+          const items = await getFileHistory(fileHistory.at(-1)!.created_at);
+          setFileHistory(old => [...new Map([...old, ...items].map(item => [item.id, item])).values()]); setMoreFiles(items.length === 20);
+        })}
+        onSend={(file, classrooms) => run('files', async () => {
+          const id = await sendFile(file, classrooms, teacherName);
+          void refreshFiles(id).catch(e => setError(message(e)));
+        })} />}
       {tab === 'schedule' && <ScheduleEditor classes={classIds} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
         onSave={(classroom, { days, duties }) => run('schedule', async () => {
           await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });

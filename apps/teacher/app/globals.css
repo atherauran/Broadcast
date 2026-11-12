@@ -244,3 +244,14 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .screen-hidden { color: #8c5c08; }
 .device-actions { display: flex; flex: 0 0 auto; gap: 10px; }
 @media (max-width: 480px) { .board-entry-row { flex-wrap: wrap; gap: 4px; } .entry-actions { margin-left: auto; } }
+
+.tabs { overflow-x: auto; }
+.file-input-label { position: relative; display: flex; align-items: center; gap: 12px; margin: 18px 0 20px; padding: 18px; border: 1px dashed #94a3b8; border-radius: 10px; cursor: pointer; overflow-wrap: anywhere; }
+.file-input-label:focus-within { outline: 2px solid #2563eb; outline-offset: 3px; }
+.file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.file-send-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.file-history { padding: 20px; }
+.file-history h3 { margin: 12px 0; overflow-wrap: anywhere; }
+.file-receipt { flex-wrap: wrap; }
+.file-saved-name { overflow-wrap: anywhere; }
+@media (max-width: 600px) { .file-send-row { align-items: stretch; flex-direction: column; } }
