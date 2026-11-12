@@ -439,14 +439,20 @@ var income = new BazaarInputWindow((request, _) =>
 }, () => refreshes++, default);
 income.Present(bazaarBatch); income.Show(); Dispatcher.UIThread.RunJobs();
 void SubmitIncome() { income.Submit.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)); Dispatcher.UIThread.RunJobs(); }
+if (income.Amount.Value != 5 || income.Amount.Minimum != 5 || income.Amount.Increment != 5)
+    throw new Exception("bazaar-input: new income must start at 5 with a step of 5");
 income.Leader.Text = " 张三 "; income.Amount.Value = 12.5m; SubmitIncome();
 if (submitted.Count != 0) throw new Exception("bazaar-input: fractional tokens must be rejected");
+income.Amount.Value = 12; SubmitIncome();
+if (submitted.Count != 0) throw new Exception("bazaar-input: non-multiples of 5 must be rejected");
 income.Amount.Value = 75; SubmitIncome();
 if (submitted.Count != 1 || submitted[0].Group != "张三组" || income.Submit.Content?.ToString() != "重试提交" || income.Leader.IsEnabled || income.Records.IsEnabled)
     throw new Exception("bazaar-input: uncertain save must keep the request and lock its values");
 failBazaar = false; SubmitIncome();
 if (submitted.Count != 2 || submitted[0] != submitted[1] || refreshes != 1 || !income.Leader.IsEnabled)
     throw new Exception("bazaar-input: retry must reuse the request ID and refresh after saving");
+if (income.Amount.Value != 5 || income.Amount.Minimum != 5)
+    throw new Exception("bazaar-input: a successful save must reset the amount to 5");
 income.GetVisualDescendants().OfType<Button>().Single(b => b.Content?.ToString() == "张三组")
     .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
 if (income.Leader.Text != "张三") throw new Exception("bazaar-input: picking a group must fill only the leader's name");
@@ -454,6 +460,8 @@ SubmitIncome();
 if (submitted[^1].Group != "张三组") throw new Exception("bazaar-input: picking a group must not duplicate the group suffix");
 income.Correct(bazaarEntries[0]);
 if (income.Leader.Text != "张三") throw new Exception("bazaar-input: corrections must fill only the leader's name");
+income.Amount.Value = 7; SubmitIncome();
+if (submitted.Count != 3) throw new Exception("bazaar-input: corrections must also use multiples of 5");
 income.Amount.Value = 0; income.Leader.Text = "李华";
 SubmitIncome();
 if (submitted[^1].Replaces != bazaarEntries[0].Id || submitted[^1].Amount != 0 || submitted[^1].Group != "李华组")

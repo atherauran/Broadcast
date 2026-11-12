@@ -570,7 +570,7 @@ describe('bazaar income ledger', () => {
     expect(batch.entries[0]).toMatchObject({ id: sale, group_name: '第1组', amount: 125, replaces_id: null });
     expect(Date.parse(batch.entries[0].occurred_at)).toBeGreaterThanOrEqual(before - 1000);
     expect(Date.parse(batch.entries[0].recorded_at)).toBeGreaterThanOrEqual(before - 1000);
-    await expect(record(sale, '第1组', 126)).rejects.toThrow('编号已使用');
+    await expect(record(sale, '第1组', 130)).rejects.toThrow('编号已使用');
   });
   it('appends corrections, retains original income and sale time, and rejects competing corrections', async () => {
     await identity(second); const original = (await state()).entries[0];
@@ -587,15 +587,17 @@ describe('bazaar income ledger', () => {
     await identity(second);
     for (const name of [null, '', '  ', '组'.repeat(31)])
       await expect(record(crypto.randomUUID(), name, 1)).rejects.toThrow('小组名称');
-    for (const amount of [null, 0, -1, 1000001])
+    for (const amount of [null, 0, -1, 1, 4, 6, 11, 999999, 1000001])
       await expect(record(crypto.randomUUID(), '第1组', amount)).rejects.toThrow('筹码');
-    await expect(record(crypto.randomUUID(), '第1组', 1, crypto.randomUUID())).rejects.toThrow('记录不存在');
+    await expect(record(crypto.randomUUID(), '第1组', 7, correction)).rejects.toThrow('5 的整数倍');
+    await expect(record(crypto.randomUUID(), '第1组', 5, crypto.randomUUID())).rejects.toThrow('记录不存在');
+    await record(crypto.randomUUID(), '第1组', 5);
   });
   it('isolates classes, blocks direct writes and denies unbound or anonymous submissions', async () => {
     await identity(third);
     expect(await scalar<number>('select count(*)::int from bazaar_entries')).toBe(0);
     expect((await state()).entries).toEqual([]);
-    await expect(record(crypto.randomUUID(), '越权', 1, sale)).rejects.toThrow('不属于本班');
+    await expect(record(crypto.randomUUID(), '越权', 5, sale)).rejects.toThrow('不属于本班');
     await expect(record(sale, '第1组', 125)).rejects.toThrow('编号已使用');
     await expect(db.query("insert into bazaar_entries(id,classroom_id,group_name,amount,recorded_by) values($1,'8-2','伪造',1,$2)", [crypto.randomUUID(), third])).rejects.toThrow('permission denied');
     await expect(db.query('update bazaar_entries set amount=999')).rejects.toThrow('permission denied');

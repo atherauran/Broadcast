@@ -99,7 +99,7 @@ internal sealed class BazaarWindow : Window
         DockPanel.SetDock(input, Dock.Right); heading.Children.Add(input); heading.Children.Add(_class);
         var total = new StackPanel { Spacing = 0, Children = { BazaarStyle.Text("全班累计筹码", 16, BazaarStyle.Muted), Total } };
         var ranking = new ScrollViewer { Content = Ranking, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
-        var curve = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Children = { BazaarStyle.Text("收入增长曲线", 18, bold: true), Chart } };
+        var curve = new Grid { RowDefinitions = new RowDefinitions("Auto,*"), Children = { BazaarStyle.Text("收入增长趋势", 18, bold: true), Chart } };
         Grid.SetRow(Chart, 1);
         var page = new Grid { Margin = new Thickness(28), RowDefinitions = new RowDefinitions("Auto,Auto,Auto,*,*,Auto"), RowSpacing = 18 };
         Control[] rows = [heading, total, BazaarStyle.Text("小组排行榜", 18, bold: true), ranking, curve, _status];
@@ -178,7 +178,7 @@ internal sealed class BazaarChart : Control
 internal sealed class BazaarInputWindow : Window
 {
     internal TextBox Leader { get; } = new() { Watermark = "例如：Beaver", MaxLength = 29, FontSize = 18 };
-    internal NumericUpDown Amount { get; } = new() { Minimum = 1, Maximum = 1000000, Increment = 1, FormatString = "0", Value = 1, FontSize = 18 };
+    internal NumericUpDown Amount { get; } = new() { Minimum = 5, Maximum = 1000000, Increment = 5, FormatString = "0", Value = 5, FontSize = 18 };
     internal Button Submit { get; } = BazaarStyle.Button("添加收入");
     internal StackPanel Records { get; } = new() { Spacing = 12 };
     private readonly StackPanel _groups = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -202,7 +202,7 @@ internal sealed class BazaarInputWindow : Window
         var form = new StackPanel { Spacing = 10, Children = { _mode, BazaarStyle.Text("组长姓名"), Leader,
             new ScrollViewer { Content = _groups, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled },
-            BazaarStyle.Text("筹码数量（整数）"), Amount,
+            BazaarStyle.Text("筹码数量（5 的整数倍）"), Amount,
             new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Children = { Submit, _cancel } }, _message } };
         var page = new Grid { Margin = new Thickness(24), RowDefinitions = new RowDefinitions("Auto,Auto,*,Auto"), RowSpacing = 14 };
         var history = new ScrollViewer { Content = Records, HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled };
@@ -263,8 +263,8 @@ internal sealed class BazaarInputWindow : Window
         if (_pending is null)
         {
             var leader = Leader.Text?.Trim() ?? "";
-            if (leader.Length == 0 || Amount.Value is not { } value || value != decimal.Truncate(value) || value < (_correcting.HasValue ? 0 : 1))
-            { _message.Text = "请填写组长姓名和有效的整数筹码。"; return; }
+            if (leader.Length == 0 || Amount.Value is not { } value || value % 5 != 0 || value < (_correcting.HasValue ? 0 : 5))
+            { _message.Text = "请填写组长姓名，筹码数量须为 5 的整数倍。"; return; }
             _pending = new(Guid.NewGuid(), leader + "组", (int)value, _correcting);
         }
         _busy = true; LockInputs();
@@ -290,7 +290,7 @@ internal sealed class BazaarInputWindow : Window
 
     private void Reset()
     {
-        _correcting = null; _pending = null; Amount.Minimum = 1; Amount.Value = 1;
+        _correcting = null; _pending = null; Amount.Minimum = 5; Amount.Value = 5;
         _mode.Text = "新增筹码"; Submit.Content = "添加收入"; _cancel.IsVisible = false; _message.Text = "";
     }
 

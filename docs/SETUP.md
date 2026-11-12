@@ -85,3 +85,5 @@ The feature caps outstanding reservations/stored transfer files at 200 MiB and k
 Apply `202611120001_bazaar.sql` before publishing the teacher app or distributing the new classroom app. It adds the default-on per-class display setting, the `bazaar_entries` ledger, scoped device RPCs and the Realtime publication entry. This feature needs no new secrets, Storage bucket or Edge Function deployment. Existing clients continue to work but do not show bazaar statistics.
 
 Use the Test classroom for the first cloud integration test: add two groups, correct an amount and cancel a record, then toggle the teacher's display switch and restart the classroom app. The same corrected totals and full history should remain. Keep production class ledgers free of test entries; there is no automatic reset or purge.
+
+Apply `202611120003_bazaar_token_steps.sql` to require new bazaar income and corrections to be multiples of 5. Existing records are retained, and 0 still cancels a record. The updated classroom input defaults to 5 and steps by 5.
