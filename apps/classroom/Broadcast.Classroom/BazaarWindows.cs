@@ -177,7 +177,7 @@ internal sealed class BazaarChart : Control
 
 internal sealed class BazaarInputWindow : Window
 {
-    internal TextBox Leader { get; } = new() { Watermark = "例如：张三", MaxLength = 29, FontSize = 18 };
+    internal TextBox Leader { get; } = new() { Watermark = "例如：Beaver", MaxLength = 29, FontSize = 18 };
     internal NumericUpDown Amount { get; } = new() { Minimum = 1, Maximum = 1000000, Increment = 1, FormatString = "0", Value = 1, FontSize = 18 };
     internal Button Submit { get; } = BazaarStyle.Button("添加收入");
     internal StackPanel Records { get; } = new() { Spacing = 12 };
