@@ -12,7 +12,8 @@ Deno.serve({ hostname: '127.0.0.1', port: 54329 }, async request => {
         const bindings = input.payload.config.postgres_changes;
         const binding = (table: string) => bindings.find((value: { table: string }) => value.table === table);
         if (!input.join_ref || binding('deliveries')?.filter !== `device_id=eq.${device}` || binding('file_deliveries')?.filter !== `device_id=eq.${device}`
-          || !binding('display_items') || binding('display_items').filter || !binding('schedules') || binding('schedules').filter) {
+          || !binding('display_items') || binding('display_items').filter || !binding('schedules') || binding('schedules').filter
+          || !binding('bazaar_entries') || binding('bazaar_entries').filter) {
           reply('phx_reply', { status: 'error', response: {} }); return;
         }
         reply('phx_reply', { status: 'ok', response: { postgres_changes: [{ id: 1 }, { id: 2 }, { id: 3 }] } });
@@ -21,6 +22,8 @@ Deno.serve({ hostname: '127.0.0.1', port: 54329 }, async request => {
         reply('postgres_changes', { ids: [2], data: { table: 'display_items', type: 'UPDATE', record: {} } });
         reply('postgres_changes', { ids: [3], data: { table: 'schedules', type: 'UPDATE', record: {} } });
         reply('postgres_changes', { ids: [4], data: { table: 'file_deliveries', type: 'INSERT', record: {} } });
+        reply('postgres_changes', { ids: [5], data: { table: 'bazaar_entries', type: 'INSERT', record: {} } });
+        reply('postgres_changes', { ids: [6], data: { table: 'classrooms', type: 'UPDATE', record: {} } });
       }
       if (input.event === 'heartbeat') { keepalives++; reply('phx_reply', { status: 'ok', response: {} }); }
     };

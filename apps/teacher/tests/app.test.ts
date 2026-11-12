@@ -64,12 +64,32 @@ it('hides and restores a classroom desktop with one click', async () => {
   const onHide = vi.fn().mockResolvedValue(true);
   const room: Classroom = { id: '8-1', device_id: 'pc', device_name: '8-1 电脑', connected: true, last_seen_at: null };
   const render = (screen_hidden: boolean) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden }], ready: true, busy: '',
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide })));
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide, onBazaar: vi.fn() })));
   await render(false);
   await click('隐藏桌面'); expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), true);
   await render(true);
   expect(host.textContent).toContain('桌面已隐藏');
   await click('恢复桌面'); expect(onHide).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), false);
+});
+it('defaults bazaar display to on and toggles it separately for each class', async () => {
+  const onBazaar = vi.fn().mockResolvedValue(true);
+  const rooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
+  const render = (enabled?: boolean, busy = '') => act(async () => root.render(createElement(Devices, {
+    rooms: rooms.map((room, i) => i === 0 ? { ...room, bazaar_enabled: enabled } : room), ready: true, busy,
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onBazaar,
+  })));
+  await render();
+  const switches = () => [...host.querySelectorAll<HTMLInputElement>('[role="switch"]')];
+  expect(switches()).toHaveLength(6);
+  expect(switches().every(input => input.checked)).toBe(true);
+  await act(async () => switches()[0].click());
+  expect(onBazaar).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), false);
+  await render(false);
+  expect(switches()[0].checked).toBe(false);
+  expect(switches().slice(1).every(input => input.checked)).toBe(true);
+  await act(async () => switches()[0].click());
+  expect(onBazaar).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), true);
+  await render(true, 'bazaar'); expect(switches().every(input => input.disabled)).toBe(true);
 });
 it('mounts the complete app and modal provider without configured cloud credentials', () => {
   expect(host.textContent).toContain('广播服务尚未配置');

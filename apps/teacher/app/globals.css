@@ -242,7 +242,7 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .sign-as { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #5f6c80; white-space: nowrap; }
 .sign-as input { width: 120px; height: 42px; }
 .screen-hidden { color: #8c5c08; }
-.device-actions { display: flex; flex: 0 0 auto; gap: 10px; }
+.device-actions { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px; }
 @media (max-width: 480px) { .board-entry-row { flex-wrap: wrap; gap: 4px; } .entry-actions { margin-left: auto; } }
 
 .tabs { overflow-x: auto; }
@@ -255,3 +255,5 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .file-receipt { flex-wrap: wrap; }
 .file-saved-name { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .file-send-row { align-items: stretch; flex-direction: column; } }
+.bazaar-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+.bazaar-switch input { width: 18px; height: 18px; accent-color: #087f5b; }

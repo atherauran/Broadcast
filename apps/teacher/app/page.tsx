@@ -451,6 +451,10 @@ export default function App() {
           setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
         })} />}
       {tab === 'devices' && <Devices rooms={visibleRooms} ready={ready} busy={busy} onBack={() => setTab('send')}
+        onBazaar={(room, enabled) => run('bazaar', async () => {
+          await rpc('set_bazaar_enabled', { p_classroom: room.id, p_enabled: enabled });
+          setRooms(old => old.map(item => item.id === room.id ? { ...item, bazaar_enabled: enabled } : item));
+        })}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })}
         onHide={(room, hidden) => run('hide', async () => {
           await rpc('set_screen_hidden', { p_classroom: room.id, p_hidden: hidden });

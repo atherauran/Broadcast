@@ -79,3 +79,9 @@ For the first integration test, use at least one Windows x64 PC and complete rec
 Apply `20261110091904_file_transfers.sql`, `20261110091908_file_transfer_cleanup.sql` and `20261110093311_file_cleanup_timeout.sql`, then redeploy `broadcast-api` before using the new teacher and classroom apps. The migrations create the private `classroom-files` bucket (20 MiB per object), enable `pg_cron` and `pg_net`, generate a dedicated cleanup token in Supabase Vault, and schedule Storage cleanup every 15 minutes. No service key or cleanup token belongs in either client. For a different project, change the cleanup migration's function URL before applying it.
 
 The feature caps outstanding reservations/stored transfer files at 200 MiB and keeps a sent file available for 24 hours. All-terminal transfers and abandoned uploads are removed sooner. This limits temporary storage; normal Supabase bandwidth quotas still apply to each classroom download. Check the `cleanup-classroom-files` Cron job and its HTTP response when diagnosing cleanup errors.
+
+## Bazaar statistics
+
+Apply `202611120001_bazaar.sql` before publishing the teacher app or distributing the new classroom app. It adds the default-on per-class display setting, the `bazaar_entries` ledger, scoped device RPCs and the Realtime publication entry. This feature needs no new secrets, Storage bucket or Edge Function deployment. Existing clients continue to work but do not show bazaar statistics.
+
+Use the Test classroom for the first cloud integration test: add two groups, correct an amount and cancel a record, then toggle the teacher's display switch and restart the classroom app. The same corrected totals and full history should remain. Keep production class ledgers free of test entries; there is no automatic reset or purge.

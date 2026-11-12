@@ -30,6 +30,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Display payloads keep long notes, font sizes and board order", DisplayPayload),
     ("Files save without overwriting and survive receipt loss and restart", FileDownloads),
     ("Files reject unsafe names, partial downloads and expired work", FileFailures),
+    ("Bazaar corrections recalculate ranks and curve without double counting", BazaarTotals),
 };
 var failed = 0;
 foreach (var test in tests)
@@ -52,6 +53,31 @@ if (args.Contains("--realtime"))
     catch (Exception e) { failed++; Console.WriteLine("FAIL Void RPC: " + e.Message); }
 }
 return failed == 0 ? 0 : 1;
+
+static Task BazaarTotals()
+{
+    var at = DateTimeOffset.Parse("2026-11-12T08:00:00Z");
+    var a = new BazaarEntry(Guid.NewGuid(), "第1组", 100, at, at);
+    var b = new BazaarEntry(Guid.NewGuid(), "第2组", 200, at.AddMinutes(2), at.AddMinutes(2));
+    var c = new BazaarEntry(Guid.NewGuid(), "第1组", 50, at.AddMinutes(2), at.AddMinutes(2));
+    var fixedA = new BazaarEntry(Guid.NewGuid(), "第2组", 80, a.OccurredAt, at.AddMinutes(3), a.Id);
+    var cancelledB = new BazaarEntry(Guid.NewGuid(), "第2组", 0, b.OccurredAt, at.AddMinutes(4), b.Id);
+    var summary = new BazaarSummary([cancelledB, c, a, fixedA, b]);
+    Check(summary.Total == 130);
+    Check(summary.Groups.SequenceEqual(new[] { new BazaarGroup("第2组", 80), new BazaarGroup("第1组", 50) }));
+    Check(summary.Curve.SequenceEqual(new[] { new BazaarPoint(at, 80), new BazaarPoint(at.AddMinutes(2), 130) }));
+    Check(summary.Current.Length == 3 && summary.Current.All(e => e.Id != a.Id && e.Id != b.Id));
+    var restored = cancelledB with { Id = Guid.NewGuid(), Amount = 20, ReplacesId = cancelledB.Id };
+    Check(new BazaarSummary([a, b, c, fixedA, cancelledB, restored]).Total == 150);
+    Check(new BazaarSummary([]).Total == 0 && new BazaarSummary([]).Curve.Length == 0);
+    var simultaneous = new BazaarSummary([a, b with { OccurredAt = at }, c with { OccurredAt = at }]);
+    Check(simultaneous.Curve.SequenceEqual(new[] { new BazaarPoint(at, 350) }));
+    // The cumulative amount must not overflow Int32 when the ledger grows.
+    Check(new BazaarSummary(Enumerable.Range(0, 3000).Select(i => a with { Id = Guid.NewGuid(), Amount = 1000000 }).ToArray()).Total == 3000000000L);
+    var payload = JsonSerializer.Deserialize<BazaarBatch>("""{"classroom_id":"8-1","enabled":true,"entries":[{"id":"20000000-0000-4000-8000-000000000001","group_name":"第1组","amount":25,"occurred_at":"2026-11-12T08:00:00Z","recorded_at":"2026-11-12T08:01:00Z","replaces_id":null}]}""", Json.Options)!;
+    Check(payload.Enabled && new BazaarSummary(payload.Entries).Total == 25);
+    return Task.CompletedTask;
+}
 
 static async Task FileDownloads()
 {
@@ -150,7 +176,7 @@ static async Task RealtimeSmoke()
         new AuthSession("fixture-access-token", "fixture-refresh-token", DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds(),
             new AuthUser("20000000-0000-4000-8000-000000000001", [])));
     using var life = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-    var changes = 0; var beats = 0; var displayChanges = 0; var fileChanges = 0;
+    var changes = 0; var beats = 0; var displayChanges = 0; var fileChanges = 0; var bazaarChanges = 0;
     // 50 ms keepalives: the status heartbeat fires every 6th and the missed-broadcast check every 2nd.
     try
     {
@@ -159,13 +185,14 @@ static async Task RealtimeSmoke()
             var result = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, ct);
             Check(result.Active && result.ClassroomId == "8-1");
             if (++beats == 3) life.Cancel();
-        }, life.Token, () => fileChanges++);
+        }, life.Token, () => fileChanges++, () => bazaarChanges++);
     }
     catch (OperationCanceledException) when (beats == 3) { }
     // beats: 1 on join + 1 per 6 keepalives; changes: 1 on join + 1 per 2 keepalives.
     Check(beats == 3 && changes >= 1 + 3 * (beats - 1), "Subscription/heartbeat did not confirm readiness");
-    Check(displayChanges == 2, "Display item and schedule changes were not routed separately");
+    Check(displayChanges == 3, "Display item, schedule and classroom changes were not routed separately");
     Check(fileChanges == 1, "File delivery changes were not routed separately");
+    Check(bazaarChanges == 2, "Bazaar income and classroom switches must refresh bazaar state");
     using var http = new HttpClient();
     var stats = await http.GetFromJsonAsync<JsonElement>("http://127.0.0.1:54329/stats");
     Check(stats.GetProperty("keepalives").GetInt32() >= 12, "Keepalives were not sent on the fast cycle");

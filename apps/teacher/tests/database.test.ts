@@ -532,3 +532,76 @@ describe('file transfers', () => {
     await expect(prepare()).rejects.toThrow('200 MB');
   });
 });
+
+describe('bazaar income ledger', () => {
+  const sale = crypto.randomUUID();
+  const correction = crypto.randomUUID();
+  const record = (id: string, group: string | null, amount: number | null, replaces: string | null = null) =>
+    db.query('select record_bazaar_income($1,$2,$3,$4)', [id, group, amount, replaces]);
+  type Entry = { id: string; group_name: string; amount: number; occurred_at: string; recorded_at: string; replaces_id: string | null };
+  const state = () => scalar<{ classroom_id: string; enabled: boolean; entries: Entry[] }>('select bazaar_state()');
+
+  it('defaults every class to enabled and stores server timestamps with an idempotent request', async () => {
+    await identity(admin, 'admin');
+    expect((await scalar<{ classrooms: { bazaar_enabled: boolean }[] }>('select classroom_status()')).classrooms.every(c => c.bazaar_enabled)).toBe(true);
+    await identity(second); const before = Date.now();
+    await record(sale, '  第1组  ', 125); await record(sale, '第1组', 125);
+    const batch = await state();
+    expect(batch).toMatchObject({ classroom_id: '8-2', enabled: true });
+    expect(batch.entries).toHaveLength(1);
+    expect(batch.entries[0]).toMatchObject({ id: sale, group_name: '第1组', amount: 125, replaces_id: null });
+    expect(Date.parse(batch.entries[0].occurred_at)).toBeGreaterThanOrEqual(before - 1000);
+    expect(Date.parse(batch.entries[0].recorded_at)).toBeGreaterThanOrEqual(before - 1000);
+    await expect(record(sale, '第1组', 126)).rejects.toThrow('编号已使用');
+  });
+  it('appends corrections, retains original income and sale time, and rejects competing corrections', async () => {
+    await identity(second); const original = (await state()).entries[0];
+    await record(correction, '第2组', 100, sale); await record(correction, '第2组', 100, sale);
+    const entries = (await state()).entries;
+    expect(entries).toHaveLength(2);
+    expect(entries.find(e => e.id === sale)).toEqual(original);
+    expect(entries.find(e => e.id === correction)).toMatchObject({ group_name: '第2组', amount: 100, replaces_id: sale, occurred_at: original.occurred_at });
+    await expect(record(crypto.randomUUID(), '第1组', 50, sale)).rejects.toThrow('已被纠错');
+    await record(crypto.randomUUID(), '第2组', 0, correction);
+    expect((await state()).entries).toHaveLength(3);
+  });
+  it('validates group names, positive new income, correction bounds and missing records', async () => {
+    await identity(second);
+    for (const name of [null, '', '  ', '组'.repeat(31)])
+      await expect(record(crypto.randomUUID(), name, 1)).rejects.toThrow('小组名称');
+    for (const amount of [null, 0, -1, 1000001])
+      await expect(record(crypto.randomUUID(), '第1组', amount)).rejects.toThrow('筹码');
+    await expect(record(crypto.randomUUID(), '第1组', 1, crypto.randomUUID())).rejects.toThrow('记录不存在');
+  });
+  it('isolates classes, blocks direct writes and denies unbound or anonymous submissions', async () => {
+    await identity(third);
+    expect(await scalar<number>('select count(*)::int from bazaar_entries')).toBe(0);
+    expect((await state()).entries).toEqual([]);
+    await expect(record(crypto.randomUUID(), '越权', 1, sale)).rejects.toThrow('不属于本班');
+    await expect(record(sale, '第1组', 125)).rejects.toThrow('编号已使用');
+    await expect(db.query("insert into bazaar_entries(id,classroom_id,group_name,amount,recorded_by) values($1,'8-2','伪造',1,$2)", [crypto.randomUUID(), third])).rejects.toThrow('permission denied');
+    await expect(db.query('update bazaar_entries set amount=999')).rejects.toThrow('permission denied');
+    await expect(db.query('delete from bazaar_entries')).rejects.toThrow('permission denied');
+    await identity(first);
+    expect(await state()).toBeNull();
+    await expect(record(crypto.randomUUID(), '第1组', 1)).rejects.toThrow('未绑定');
+    await db.exec('reset role; set role anon');
+    await expect(record(crypto.randomUUID(), '第1组', 1)).rejects.toThrow('permission denied');
+    await expect(db.query('select bazaar_state()')).rejects.toThrow('permission denied');
+  });
+  it('lets only teachers switch display and preserves the full ledger when hidden', async () => {
+    await identity(second); const entries = (await state()).entries;
+    await expect(db.query("select set_bazaar_enabled('8-2',false)")).rejects.toThrow('管理员');
+    await identity(admin, 'admin');
+    await db.query("select set_bazaar_enabled('8-2',false)");
+    await identity(second); expect(await state()).toEqual({ classroom_id: '8-2', enabled: false, entries });
+    await identity(admin, 'admin');
+    await db.query("select set_bazaar_enabled('8-2',true)");
+    await db.query("select set_screen_hidden('8-2',true)");
+    await identity(second); expect((await state()).enabled).toBe(false);
+    await identity(admin, 'admin'); await db.query("select set_screen_hidden('8-2',false)");
+    await expect(db.query("select set_bazaar_enabled('missing',true)")).rejects.toThrow('班级无效');
+    await expect(db.query("select set_bazaar_enabled('8-2',null)")).rejects.toThrow('选项无效');
+    await identity(second); expect(await state()).toEqual({ classroom_id: '8-2', enabled: true, entries });
+  });
+});

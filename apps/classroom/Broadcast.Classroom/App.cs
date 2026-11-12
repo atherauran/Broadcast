@@ -18,6 +18,7 @@ public sealed class App : Application
     private TencentSpeechSynthesizer? _speech;
     private SetupWindow? _settings;
     private TrayIcon? _tray;
+    private BazaarDisplay? _bazaar;
     private CancellationTokenSource? _receiverLife;
     private Task? _receiverTask;
     private readonly CancellationTokenSource _appLife = new();
@@ -31,8 +32,9 @@ public sealed class App : Application
             try { _config = LocalState.Config(); } catch (Exception e) { LocalState.Log(e); }
             var menu = new NativeMenu();
             var setup = new NativeMenuItem("教室设置"); setup.Click += (_, _) => ShowSettings();
+            var bazaar = new NativeMenuItem("义卖实时统计"); bazaar.Click += (_, _) => _bazaar?.Show();
             var exit = new NativeMenuItem("退出广播"); exit.Click += (_, _) => ShowSettings(true);
-            menu.Add(setup); menu.Add(new NativeMenuItemSeparator()); menu.Add(exit);
+            menu.Add(bazaar); menu.Add(setup); menu.Add(new NativeMenuItemSeparator()); menu.Add(exit);
             _tray = new TrayIcon { ToolTipText = "校园广播 · 尚未绑定", Menu = menu,
                 Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Broadcast.Classroom/Assets/icon.png"))) };
             _tray.Clicked += (_, _) => ShowSettings(); TrayIcon.SetIcons(this, [_tray]);
@@ -91,12 +93,21 @@ public sealed class App : Application
         display.Error += LocalState.Log;
         var files = new FileTransferReceiver(_backend, outbox, clock, Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             Path.Combine(LocalState.Folder, "files-" + device.Id));
-        var receiver = new ReceiverService(_backend, queue, outbox, clock, display, files);
-        receiver.StatusChanged += state => Dispatcher.UIThread.Post(() => { if (_tray is not null) _tray.ToolTipText = "校园广播 · " + state; });
+        _receiverLife = CancellationTokenSource.CreateLinkedTokenSource(_appLife.Token);
+        var bazaar = new BazaarSync(_backend);
+        var bazaarDisplay = new BazaarDisplay(bazaar, _receiverLife.Token);
+        _bazaar = bazaarDisplay;
+        bazaar.Changed += state => Dispatcher.UIThread.Post(() => bazaarDisplay.Apply(state));
+        bazaar.Error += _ => Dispatcher.UIThread.Post(bazaarDisplay.SyncFailed);
+        var receiver = new ReceiverService(_backend, queue, outbox, clock, display, files, bazaar);
+        receiver.StatusChanged += state => Dispatcher.UIThread.Post(() =>
+        {
+            if (_tray is not null) _tray.ToolTipText = "校园广播 · " + state;
+            bazaarDisplay.SetStatus(state);
+        });
         receiver.Error += LocalState.Log;
         receiver.BindingRevoked += () => Dispatcher.UIThread.Post(async () => await TransitionAsync(async () =>
         { await StopAsync(); LocalState.ForgetDevice(); ShowSettings(notice: "设备已解绑或登录失效，请重新绑定。"); }));
-        _receiverLife = CancellationTokenSource.CreateLinkedTokenSource(_appLife.Token);
         _receiverTask = Task.Run(() => receiver.RunAsync(_receiverLife.Token));
     }
 
@@ -108,6 +119,7 @@ public sealed class App : Application
             try { await _receiverTask; } catch (OperationCanceledException) { } catch (Exception e) { LocalState.Log(e); }
         }
         _receiverLife?.Dispose(); _receiverLife = null; _receiverTask = null;
+        _bazaar?.Dispose(); _bazaar = null;
         _speech?.Dispose(); _speech = null;
         _backend?.Dispose(); _backend = null;
         if (_tray is not null) _tray.ToolTipText = "校园广播 · 尚未绑定";

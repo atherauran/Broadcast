@@ -12,7 +12,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
     private const int RecheckEvery = 2;   // every 40 seconds, so a missed notification is recovered while a 30-second broadcast may still be valid
     private const int StatusEvery = 6;    // every 120 seconds
 
-    public async Task RunAsync(Action changed, Action displayChanged, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct, Action? filesChanged = null)
+    public async Task RunAsync(Action changed, Action displayChanged, Func<CancellationToken, Task> liveHeartbeat, CancellationToken ct, Action? filesChanged = null, Action? bazaarChanged = null)
     {
         using var life = CancellationTokenSource.CreateLinkedTokenSource(ct);
         using var socket = new ClientWebSocket();
@@ -35,6 +35,7 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
                     postgres_changes = new object[] {
                         new { @event = "INSERT", schema = "public", table = "deliveries", filter = "device_id=eq." + backend.Session.User.Id },
                         new { @event = "INSERT", schema = "public", table = "file_deliveries", filter = "device_id=eq." + backend.Session.User.Id },
+                        new { @event = "INSERT", schema = "public", table = "bazaar_entries" },
                         new { @event = "*", schema = "public", table = "display_items" },
                         new { @event = "*", schema = "public", table = "schedules" },
                         new { @event = "*", schema = "public", table = "birthdays" },
@@ -109,7 +110,12 @@ public sealed class RealtimeConnection(BackendClient backend, TimeSpan? keepAliv
                     }
                     if (kind == "postgres_changes")
                     {
-                        if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("table", out var table) && table.GetString() is "display_items" or "schedules" or "birthdays" or "classrooms") displayChanged();
+                        if (payload.TryGetProperty("data", out var data) && data.TryGetProperty("table", out var table) && table.GetString() is "display_items" or "schedules" or "birthdays" or "classrooms")
+                        {
+                            displayChanged();
+                            if (table.GetString() == "classrooms") bazaarChanged?.Invoke();
+                        }
+                        else if (payload.TryGetProperty("data", out var incomeData) && incomeData.TryGetProperty("table", out var incomeTable) && incomeTable.GetString() == "bazaar_entries") bazaarChanged?.Invoke();
                         else if (payload.TryGetProperty("data", out var fileData) && fileData.TryGetProperty("table", out var fileTable) && fileTable.GetString() == "file_deliveries") filesChanged?.Invoke();
                         else changed();
                     }

@@ -28,7 +28,7 @@ export const TEMPLATES: { label: string; text: string }[] = [
 export const BOARD_TEMPLATES = [{ label: '晨会通知', title: '晨会通知', end: '08:30' }];
 export interface Classroom {
   id: string; device_id: string | null; device_name: string | null;
-  last_seen_at: string | null; connected: boolean; screen_hidden?: boolean;
+  last_seen_at: string | null; connected: boolean; screen_hidden?: boolean; bazaar_enabled?: boolean;
 }
 export interface Delivery {
   id: string; classroom_id: string; device_id: string | null; online_at_send: boolean;

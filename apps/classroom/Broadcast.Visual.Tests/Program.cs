@@ -406,6 +406,66 @@ Apply("empty-again", null);
 if (stateDisplay.Open.Any()) throw new Exception("empty: windows left open");
 Console.WriteLine("PASS layout: columns, stacking and on-screen bounds across updates");
 
+var bazaarAt = DateTimeOffset.Now.AddHours(-2);
+var bazaarLeaders = new[] { "张三", "李四", "王五", "赵六", "小明", "小红" };
+var bazaarEntries = Enumerable.Range(0, 12).Select(i => new BazaarEntry(Guid.NewGuid(), bazaarLeaders[i % 6] + "组",
+    (i + 1) * 25, bazaarAt.AddMinutes(i * 10), bazaarAt.AddMinutes(i * 10))).ToArray();
+var bazaarBatch = new BazaarBatch("8-1", true, bazaarEntries);
+foreach (var (name, width, height, entries) in new[] {
+    ("bazaar", 860, 780, bazaarEntries), ("bazaar-small", 600, 600, bazaarEntries), ("bazaar-empty", 600, 600, Array.Empty<BazaarEntry>()),
+    ("bazaar-long-group", 600, 600, bazaarEntries.Select(e => e with { GroupName = new string('组', 30) }).ToArray()),
+})
+{
+    var window = new BazaarWindow(() => { }) { Width = width, Height = height };
+    window.Present(bazaarBatch with { Entries = entries }); window.Show(); Dispatcher.UIThread.RunJobs();
+    if (window.Topmost || !window.CanResize || !window.ShowInTaskbar || window.SystemDecorations != SystemDecorations.Full)
+        throw new Exception(name + ": must be a normal resizable desktop window");
+    if (window.Total.Text != entries.Sum(e => e.Amount).ToString("N0") || window.Chart.Bounds.Height < 90)
+        throw new Exception(name + ": total or chart layout failed");
+    foreach (var text in window.GetVisualDescendants().OfType<TextBlock>())
+        if (text.IsEffectivelyVisible && text.TranslatePoint(default, window) is { } pos && (pos.X < 0 || pos.X + text.Bounds.Width > width + 1))
+            throw new Exception(name + ": text overflows horizontally");
+    AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+    using (var frame = window.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, name + ".png"));
+    window.Close(); if (window.IsVisible) throw new Exception(name + ": a normal close should work");
+}
+Console.WriteLine("PASS bazaar: normal windows, empty state, small size and long group names");
+
+var submitted = new List<BazaarRequest>(); var refreshes = 0; var failBazaar = true;
+var income = new BazaarInputWindow((request, _) =>
+{
+    submitted.Add(request);
+    return failBazaar ? Task.FromException(new IOException("网络中断")) : Task.CompletedTask;
+}, () => refreshes++, default);
+income.Present(bazaarBatch); income.Show(); Dispatcher.UIThread.RunJobs();
+void SubmitIncome() { income.Submit.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)); Dispatcher.UIThread.RunJobs(); }
+income.Leader.Text = " 张三 "; income.Amount.Value = 12.5m; SubmitIncome();
+if (submitted.Count != 0) throw new Exception("bazaar-input: fractional tokens must be rejected");
+income.Amount.Value = 75; SubmitIncome();
+if (submitted.Count != 1 || submitted[0].Group != "张三组" || income.Submit.Content?.ToString() != "重试提交" || income.Leader.IsEnabled || income.Records.IsEnabled)
+    throw new Exception("bazaar-input: uncertain save must keep the request and lock its values");
+failBazaar = false; SubmitIncome();
+if (submitted.Count != 2 || submitted[0] != submitted[1] || refreshes != 1 || !income.Leader.IsEnabled)
+    throw new Exception("bazaar-input: retry must reuse the request ID and refresh after saving");
+income.GetVisualDescendants().OfType<Button>().Single(b => b.Content?.ToString() == "张三组")
+    .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+if (income.Leader.Text != "张三") throw new Exception("bazaar-input: picking a group must fill only the leader's name");
+SubmitIncome();
+if (submitted[^1].Group != "张三组") throw new Exception("bazaar-input: picking a group must not duplicate the group suffix");
+income.Correct(bazaarEntries[0]);
+if (income.Leader.Text != "张三") throw new Exception("bazaar-input: corrections must fill only the leader's name");
+income.Amount.Value = 0; income.Leader.Text = "李华";
+SubmitIncome();
+if (submitted[^1].Replaces != bazaarEntries[0].Id || submitted[^1].Amount != 0 || submitted[^1].Group != "李华组")
+    throw new Exception("bazaar-input: cancellation must append a zero correction");
+income.Correct(bazaarEntries[1]);
+income.Present(bazaarBatch with { Entries = [.. bazaarEntries, bazaarEntries[1] with { Id = Guid.NewGuid(), ReplacesId = bazaarEntries[1].Id }] });
+if (income.Submit.Content?.ToString() != "添加收入") throw new Exception("bazaar-input: a competing correction must reset the stale editor");
+AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
+using (var frame = income.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "bazaar-input.png"));
+income.Close();
+Console.WriteLine("PASS bazaar input: leader names, group suffix, validation, idempotent retry, corrections and stale editor");
+
 // Stands in for the speakers: holds the sound until it is stopped.
 sealed class SilentAudio : IAudioPlayer
 {
