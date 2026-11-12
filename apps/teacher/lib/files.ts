@@ -1,4 +1,4 @@
-export const MAX_FILE_BYTES = 20 * 1024 * 1024;
+export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 export type FileReceipt = {
   id: string; classroom_id: string; received_at: string | null; downloaded_at: string | null;
   failed_at: string | null; saved_name: string | null; error: string | null;
@@ -8,7 +8,7 @@ export type FileTransfer = {
   expires_at: string; deleted_at: string | null; deliveries: FileReceipt[];
 };
 export function fileError(file: Pick<File, 'name' | 'size'>): string | null {
-  if (!file.size || file.size > MAX_FILE_BYTES) return '文件大小须为 1 字节至 20 MB';
+  if (!file.size || file.size > MAX_FILE_BYTES) return '文件大小须为 1 字节至 10 MB';
   if (file.name.length > 180 || file.name.split('').some(c => c.charCodeAt(0) < 32) || /[<>:"/\\|?*]|[. ]$/.test(file.name)
     || /^(CON|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])$/i.test(file.name.split('.')[0]))
     return '文件名不适用于 Windows，请重命名后上传';

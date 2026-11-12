@@ -112,6 +112,10 @@ it('opens history without presenting fabricated records', async () => {
   await click('正在显示'); expect(host.querySelectorAll('.screen-card')).toHaveLength(6);
   expect(host.textContent).toContain('没有显示内容');
 });
+it('describes file transfers with the 10 MB limit', async () => {
+  await click('文件传输');
+  expect(host.querySelector('.file-upload p')?.textContent).toBe('将自动保存到教室电脑桌面，每次一个文件，最大 10 MB');
+});
 it('plays the selected voice from the published static samples', async () => {
   const play = vi.fn().mockResolvedValue(undefined);
   const Audio = vi.fn(function (this: { play: typeof play; pause: () => void }, source: string) {
@@ -268,7 +272,7 @@ it('lists a teacher\'s own saved boards and folds the other teachers\' ones', as
   expect(onDelete).toHaveBeenCalledWith('b');
 });
 it('builds a weekly schedule day by day and keeps it across tabs', async () => {
-  await click('课表/值日'); expect(host.querySelector('.day-tabs')).toBeNull();
+  await click('班务'); expect(host.querySelector('.day-tabs')).toBeNull();
   await click('8-2'); expect(localStorage.getItem('broadcast-schedule-class')).toBe('8-2');
   const day = (label: string) => act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.day-tabs button')).find(b => b.textContent?.startsWith(label))!.click());
   await day('周一');
@@ -279,7 +283,7 @@ it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   expect(selects()).toEqual(['english', 'lunch']);
   await day('周二'); expect(selects()).toEqual([]); await click('体育 PE');
   expect(host.querySelector('.day-tabs')?.textContent).toContain('周一2 节');
-  await click('发布'); await click('课表/值日');
+  await click('发布'); await click('班务');
   expect(host.querySelector('.day-tabs')?.textContent).toContain('周二1 节');
   const save = () => Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('保存 8-2 课表/值日'))!;
   expect(save().disabled).toBe(true);
@@ -290,4 +294,31 @@ it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 项值日"]')!, '');
   await type(host.querySelector<HTMLInputElement>('[aria-label="周三第 1 项值日生"]')!, 'Eva');
   expect(host.querySelector('.duty-task.invalid')).not.toBeNull();
+});
+it('combines birthdays and schedules under class affairs with one class selection and preserved drafts', async () => {
+  expect([...host.querySelectorAll('nav[aria-label="主要导航"] button')].map(b => b.textContent?.trim()))
+    .toEqual(['发布', '正在显示', '广播历史', '文件传输', '班务']);
+  await click('班务'); await click('8-2');
+  await click('英语 English');
+  await click('生日');
+  expect(host.querySelectorAll('.schedule-classes')).toHaveLength(1);
+  expect(host.querySelector('.schedule-classes [aria-pressed="true"]')?.textContent).toBe('8-2');
+  expect(host.textContent).toContain('8-2 学生生日');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 位姓名"]')!, '张三');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 位生日（月）"]')!, '5');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 位生日（日）"]')!, '12');
+  await click('8-3');
+  expect(host.textContent).toContain('8-3 学生生日');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位姓名"]')!.value).toBe('');
+  await click('课表/值日');
+  expect(host.querySelectorAll('.period-select')).toHaveLength(0);
+  await click('8-2');
+  expect([...host.querySelectorAll<HTMLSelectElement>('.period-select')].map(s => s.value)).toEqual(['english']);
+  await click('生日');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位姓名"]')!.value).toBe('张三');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位生日（月）"]')!.value).toBe('5');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位生日（日）"]')!.value).toBe('12');
+  await click('发布'); await click('班务');
+  expect(host.textContent).toContain('8-2 学生生日');
+  expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位姓名"]')!.value).toBe('张三');
 });

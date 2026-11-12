@@ -76,7 +76,7 @@ For the first integration test, use at least one Windows x64 PC and complete rec
 
 ## File transfers
 
-Apply `20261110091904_file_transfers.sql`, `20261110091908_file_transfer_cleanup.sql` and `20261110093311_file_cleanup_timeout.sql`, then redeploy `broadcast-api` before using the new teacher and classroom apps. The migrations create the private `classroom-files` bucket (20 MiB per object), enable `pg_cron` and `pg_net`, generate a dedicated cleanup token in Supabase Vault, and schedule Storage cleanup every 15 minutes. No service key or cleanup token belongs in either client. For a different project, change the cleanup migration's function URL before applying it.
+Apply `20261110091904_file_transfers.sql`, `20261110091908_file_transfer_cleanup.sql`, `20261110093311_file_cleanup_timeout.sql` and `202611120002_file_limit_10mb.sql`, then redeploy `broadcast-api` before using the new teacher and classroom apps. The migrations create the private `classroom-files` bucket (10 MiB per object), enable `pg_cron` and `pg_net`, generate a dedicated cleanup token in Supabase Vault, and schedule Storage cleanup every 15 minutes. No service key or cleanup token belongs in either client. For a different project, change the cleanup migration's function URL before applying it.
 
 The feature caps outstanding reservations/stored transfer files at 200 MiB and keeps a sent file available for 24 hours. All-terminal transfers and abandoned uploads are removed sooner. This limits temporary storage; normal Supabase bandwidth quotas still apply to each classroom download. Check the `cleanup-classroom-files` Cron job and its HTTP response when diagnosing cleanup errors.
 

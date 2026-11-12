@@ -81,6 +81,7 @@ public sealed class FileTransferReceiver(IFileTransferBackend backend, ReceiptOu
 
     public static void Validate(FileTransfer file)
     {
+        // New sends are capped at 10 MiB by the server; still receive files sent under the former 20 MiB limit.
         var name = file.Filename;
         var stem = name.Split('.')[0].ToUpperInvariant();
         if (string.IsNullOrWhiteSpace(name) || name.Length > 180 || name.Any(c => c < 32 || "<>:\"/\\|?*".Contains(c))

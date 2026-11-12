@@ -6,18 +6,16 @@ import { DAY_PERIODS, DUTY_LIMIT, SCHOOL_DAYS, SUBJECTS, clockText, dutyRows, em
 import { scheduleFromLines } from '@/lib/import';
 import { PhotoImport } from './photo-import';
 
-export const classKey = 'broadcast-schedule-class';
 // Monday to Friday open on their own day; a weekend opens on Monday.
 const thisSchoolDay = () => { const day = new Date().getDay(); return day >= 1 && day <= 5 ? day - 1 : 0; };
 
 const blankDuty = (): Duty => ({ task: '', days: SCHOOL_DAYS.map(() => '') });
 
 // Unsaved timetables live in the parent, so switching class or tab keeps them. Duty jobs are shared by the week; each day tab edits that day's names.
-export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, ready, busy, onSave, onError }: {
-  classes: string[]; schedules: Schedule[]; drafts: Record<string, Timetable>; setDrafts: (update: (old: Record<string, Timetable>) => Record<string, Timetable>) => void;
+export function ScheduleEditor({ classroom, schedules, drafts, setDrafts, now, ready, busy, onSave, onError }: {
+  classroom: string; schedules: Schedule[]; drafts: Record<string, Timetable>; setDrafts: (update: (old: Record<string, Timetable>) => Record<string, Timetable>) => void;
   now: number; ready: boolean; busy: string; onSave: (classroom: string, timetable: Timetable) => Promise<boolean>; onError: (message: string) => void;
 }) {
-  const [classroom, setClassroom] = useState(() => localStorage.getItem(classKey) || '');
   const [day, setDay] = useState(thisSchoolDay);
   const saved = schedules.find(item => item.classroom_id === classroom);
   const savedTable: Timetable = { days: saved?.days ?? emptyWeek(), duties: saved?.duties ?? [] };
@@ -31,7 +29,6 @@ export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, rea
   const change = (next: Partial<Timetable>) => setDrafts(old => ({ ...old, [classroom]: { ...table, ...next } }));
   const edit = (next: string[]) => change({ days: week.map((list, at) => at === day ? next : list) });
   const editDuty = (index: number, next: Duty) => change({ duties: duties.map((old, at) => at === index ? next : old) });
-  function pick(id: string) { setClassroom(id); localStorage.setItem(classKey, id); }
   // A photographed week replaces all five days of this class's draft.
   function imported(lines: Parameters<typeof scheduleFromLines>[0]) {
     const { week: read, unknown } = scheduleFromLines(lines);
@@ -42,17 +39,11 @@ export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, rea
     if (await onSave(classroom, { days: week, duties: rows })) setDrafts(old => { const rest = { ...old }; delete rest[classroom]; return rest; });
   }
 
-  return <>
-    <section className="section">
+  return <section className="section composer">
       <div className="section-heading">
-        <h1>课程表</h1>
-        {classroom && <span className="muted">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</span>}
+        <h2>{classroom} 课表/值日</h2>
+        <span className="muted">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</span>
       </div>
-      <div className="choice-row schedule-classes">
-        {classes.map(id => <button type="button" key={id} className={id === classroom ? 'active' : ''} aria-pressed={id === classroom} onClick={() => pick(id)}>{id}</button>)}
-      </div>
-    </section>
-    {classroom && <section className="section composer">
       <div className="day-tabs" aria-label="星期">{SCHOOL_DAYS.map((label, at) => <button type="button" key={label} className={at === day ? 'active' : ''}
         aria-pressed={at === day} onClick={() => setDay(at)}>{label}<small>{week[at].length ? `${week[at].length} 节` : '空'}</small></button>)}</div>
       <ol className="entry-list period-list">{periods.map((id, index) => <li key={index} className="entry-row">
@@ -87,6 +78,5 @@ export function ScheduleEditor({ classes, schedules, drafts, setDrafts, now, rea
           </Button>
         </div>
       </div>
-    </section>}
-  </>;
+    </section>;
 }

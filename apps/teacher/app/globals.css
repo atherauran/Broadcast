@@ -161,6 +161,9 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .choice-row button.theme-tech { background: linear-gradient(135deg, #0b1220, #15305a); color: #38bdf8; }
 .choice-row button.theme-safety { background: linear-gradient(135deg, #fff6d8, #ffe2a8); color: #b45309; }
 .choice-row.schedule-classes { display: grid; grid-template-columns: repeat(6, 1fr); } .schedule-classes button { padding: 0; font-size: 17px; font-weight: 600; }
+.class-sections { margin-top: 14px; }
+.class-sections button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.birthday-updated { margin: -4px 0 14px; font-size: 14px; }
 .day-tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
 .day-tabs button { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 4px 8px; border: 1px solid #cfd7e4; border-radius: 10px; background: #fff; color: #344158; font-weight: 600; }
 .day-tabs button small { color: #7b879a; font-size: 12px; font-weight: 500; }
@@ -250,9 +253,12 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .file-input-label:focus-within { outline: 2px solid #2563eb; outline-offset: 3px; }
 .file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .file-send-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.file-history { padding: 20px; }
-.file-history h3 { margin: 12px 0; overflow-wrap: anywhere; }
-.file-receipt { flex-wrap: wrap; }
+.file-history { padding: 14px; }
+.file-history .history-meta { margin-bottom: 0; }
+.file-history h3 { margin: 6px 0; font-size: 16px; line-height: 1.4; font-weight: 550; overflow-wrap: anywhere; }
+.file-history .receipts { margin-top: 8px; }
+.file-receipt { flex-wrap: wrap; padding: 7px 0; }
+.file-receipt:last-child { padding-bottom: 0; border-bottom: 0; }
 .file-saved-name { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .file-send-row { align-items: stretch; flex-direction: column; } }
 .bazaar-switch { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }

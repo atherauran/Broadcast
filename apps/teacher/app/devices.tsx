@@ -13,7 +13,7 @@ export function Devices({ rooms, ready, busy, onBack, onUnbind, onHide, onBazaar
   return <section className="section devices-panel">
     <Button variant="ghost" className="back-button" onClick={onBack}><ArrowLeft size={18} />返回广播</Button>
     <h1>教室设备</h1>
-    <p className="muted device-intro">义卖统计关闭后保留收入记录。隐藏桌面会收起该班电脑上的公告、便签、课表等，恢复后原样显示。更换电脑前，可在这里解除原设备绑定。</p>
+    <p className="muted device-intro">隐藏桌面会收起该班电脑上的公告、便签、课表等，恢复后原样显示。更换电脑前，可在这里解除原设备绑定。</p>
     {rooms.map(room => <div className="device-row" key={room.id}>
       <div><strong>{room.id}</strong><p className="muted">{room.device_name || '未绑定设备'}{room.screen_hidden && <span className="screen-hidden"> · 桌面已隐藏</span>}</p></div>
       <div className="device-actions">

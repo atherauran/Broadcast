@@ -58,7 +58,9 @@ export default function App() {
   const [feedbackOpen, setFeedbackOpen] = useState<{ focus: string | null } | null>(null);
   const [seenMap, setSeenMap] = useState(readSeen);
   const [intro, setIntro] = useState(() => !localStorage.getItem(introKey));
-  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'files' | 'schedule' | 'birthdays' | 'devices'>('send');
+  const [tab, setTab] = useState<'send' | 'screen' | 'history' | 'files' | 'class' | 'devices'>('send');
+  const [classroom, setClassroom] = useState(() => localStorage.getItem('broadcast-schedule-class') || '');
+  const [classSection, setClassSection] = useState<'schedule' | 'birthdays'>('schedule');
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -352,6 +354,7 @@ export default function App() {
   const shown = (id: string) => maintainer || id !== TEST_CLASSROOM;
   const visibleRooms = rooms.filter(room => shown(room.id));
   const classIds = visibleRooms.map(room => room.id);
+  const adminClassroom = classIds.includes(classroom) ? classroom : '';
   const visibleOverview = overview.filter(item => shown(item.classroom_id));
   const visibleDrafts = boardDrafts.filter(draft => !draft.classrooms.length || draft.classrooms.some(shown));
   const visibleHistory = maintainer ? history
@@ -386,8 +389,7 @@ export default function App() {
         <button className={tab === 'screen' ? 'active' : ''} onClick={() => setTab('screen')}><MonitorPlay size={18} />正在显示</button>
         <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><Clock3 size={18} />广播历史</button>
         <button className={tab === 'files' ? 'active' : ''} onClick={() => setTab('files')}><FileUp size={18} />文件传输</button>
-        <button className={tab === 'schedule' ? 'active' : ''} onClick={() => setTab('schedule')}><CalendarDays size={18} />课表/值日</button>
-        <button className={tab === 'birthdays' ? 'active' : ''} onClick={() => setTab('birthdays')}><Cake size={18} />生日</button>
+        <button className={tab === 'class' ? 'active' : ''} onClick={() => setTab('class')}><CalendarDays size={18} />班务</button>
       </nav>
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
       {configured && !known && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
@@ -440,16 +442,31 @@ export default function App() {
           const id = await sendFile(file, classrooms, teacherName);
           void refreshFiles(id).catch(e => setError(message(e)));
         })} />}
-      {tab === 'schedule' && <ScheduleEditor classes={classIds} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
-        onSave={(classroom, { days, duties }) => run('schedule', async () => {
-          await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
-          setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
-        })} />}
-      {tab === 'birthdays' && <BirthdayEditor classes={classIds} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
-        onError={setError} onSave={(classroom, students) => run('birthdays', async () => {
-          await rpc('set_birthdays', { p_classroom: classroom, p_students: students, p_teacher_name: teacherName });
-          setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
-        })} />}
+      {tab === 'class' && <>
+        <section className="section">
+          <div className="section-heading"><h1>班务</h1></div>
+          <div className="choice-row schedule-classes" aria-label="班级">
+            {classIds.map(id => <button type="button" key={id} className={id === adminClassroom ? 'active' : ''} aria-pressed={id === adminClassroom}
+              onClick={() => { setClassroom(id); localStorage.setItem('broadcast-schedule-class', id); }}>{id}</button>)}
+          </div>
+          <div className="choice-row class-sections" aria-label="班务内容">
+            <button type="button" className={classSection === 'schedule' ? 'active' : ''} aria-pressed={classSection === 'schedule'}
+              onClick={() => setClassSection('schedule')}><CalendarDays size={17} />课表/值日</button>
+            <button type="button" className={classSection === 'birthdays' ? 'active' : ''} aria-pressed={classSection === 'birthdays'}
+              onClick={() => setClassSection('birthdays')}><Cake size={17} />生日</button>
+          </div>
+        </section>
+        {adminClassroom && classSection === 'schedule' && <ScheduleEditor classroom={adminClassroom} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
+          onSave={(classroom, { days, duties }) => run('schedule', async () => {
+            await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
+            setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
+          })} />}
+        {adminClassroom && classSection === 'birthdays' && <BirthdayEditor classroom={adminClassroom} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
+          onError={setError} onSave={(classroom, students) => run('birthdays', async () => {
+            await rpc('set_birthdays', { p_classroom: classroom, p_students: students, p_teacher_name: teacherName });
+            setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
+          })} />}
+      </>}
       {tab === 'devices' && <Devices rooms={visibleRooms} ready={ready} busy={busy} onBack={() => setTab('send')}
         onBazaar={(room, enabled) => run('bazaar', async () => {
           await rpc('set_bazaar_enabled', { p_classroom: room.id, p_enabled: enabled });

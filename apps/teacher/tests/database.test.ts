@@ -471,7 +471,7 @@ describe('file transfers', () => {
   it('enforces size, Windows filenames, classes, permissions and immutable requests', async () => {
     for (const name of ['../bad.pdf', 'CON.txt', 'LPT¹.txt', 'file.', 'bad:name']) await expect(prepare(['8-1'], name)).rejects.toThrow('文件名');
     await expect(prepare(['8-1'], 'empty.pdf', 0)).rejects.toThrow('大小');
-    await expect(prepare(['8-1'], 'big.pdf', 20971521)).rejects.toThrow('大小');
+    await expect(prepare(['8-1'], 'big.pdf', 10485761)).rejects.toThrow('10 MB');
     await expect(prepare(['8-1', '8-1'])).rejects.toThrow('班级');
     const f = await prepare();
     await expect(db.query('select send_file_transfer($1)', [f.id])).rejects.toThrow('尚未上传');
@@ -479,6 +479,24 @@ describe('file transfers', () => {
     await identity(second);
     await expect(db.query('select prepare_file_transfer($1,$2,123,$3,$4)', [crypto.randomUUID(), 'a.pdf', ['8-2'], '伪造'])).rejects.toThrow('管理员');
     await expect(upload(f.path)).rejects.toThrow('row-level security');
+  });
+  it('accepts exactly 10 MiB and caps the Storage bucket at the same size', async () => {
+    await prepare(['8-1'], 'limit.pdf', 10485760);
+    await db.exec('reset role');
+    expect(await scalar<number>("select file_size_limit::int from storage.buckets where id='classroom-files'")).toBe(10485760);
+  });
+  it('retains old large-file history but refuses new sends above 10 MiB', async () => {
+    const sent = crypto.randomUUID(), unsent = crypto.randomUUID();
+    await db.exec('reset role');
+    for (const id of [sent, unsent])
+      await db.query("insert into file_transfers(id,filename,size_bytes,classrooms,teacher_name,created_by,sent_at) values($1,'legacy.pdf',20971520,ARRAY['8-1'],'王老师',$2,$3)",
+        [id, admin, id === sent ? new Date().toISOString() : null]);
+    await identity(admin, 'admin');
+    expect(await scalar('select send_file_transfer($1)', [sent])).toBe(sent);
+    expect(await scalar<number>('select size_bytes::int from file_transfers where id=$1', [sent])).toBe(20971520);
+    await expect(db.query('select send_file_transfer($1)', [unsent])).rejects.toThrow('10 MB');
+    await db.exec('reset role');
+    await db.query('update file_transfers set deleted_at=clock_timestamp() where id = any($1)', [[sent, unsent]]);
   });
   it('publishes once and authorizes only the bound target devices to download', async () => {
     const f = await sent();
@@ -528,7 +546,7 @@ describe('file transfers', () => {
     await expect(db.query('select send_file_transfer($1)', [f.id])).rejects.toThrow('尚未上传');
     await db.exec('reset role');
     await db.exec("update file_transfers set deleted_at=clock_timestamp(); delete from storage.objects");
-    for (let i = 0; i < 10; i++) await prepare(['8-1'], `f${i}.pdf`, 20971520);
+    for (let i = 0; i < 20; i++) await prepare(['8-1'], `f${i}.pdf`, 10485760);
     await expect(prepare()).rejects.toThrow('200 MB');
   });
 });

@@ -1,11 +1,10 @@
-import { useState, type ClipboardEvent } from 'react';
+import type { ClipboardEvent } from 'react';
 import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { BIRTHDAY_LIMIT, clockText, monthDays, pad, pastedBirthdays, type Birthday, type BirthdayList } from '@/lib/domain';
 import { birthdaysFromLines } from '@/lib/import';
 import { PhotoImport } from './photo-import';
-import { classKey } from './schedule';
 
 // A row as typed: month and day are free text until saved.
 export interface BirthdayRow { name: string; month: string; day: string }
@@ -17,11 +16,10 @@ const month = (row: BirthdayRow) => number(row.month, 12);
 const day = (row: BirthdayRow) => number(row.day, monthDays(month(row) || 1));
 
 // Unsaved lists live in the parent, so switching class or tab keeps them.
-export function BirthdayEditor({ classes, lists, drafts, setDrafts, now, ready, busy, onSave, onError }: {
-  classes: string[]; lists: BirthdayList[]; drafts: Record<string, BirthdayRow[]>; setDrafts: (update: (old: Record<string, BirthdayRow[]>) => Record<string, BirthdayRow[]>) => void;
+export function BirthdayEditor({ classroom, lists, drafts, setDrafts, now, ready, busy, onSave, onError }: {
+  classroom: string; lists: BirthdayList[]; drafts: Record<string, BirthdayRow[]>; setDrafts: (update: (old: Record<string, BirthdayRow[]>) => Record<string, BirthdayRow[]>) => void;
   now: number; ready: boolean; busy: string; onSave: (classroom: string, students: Birthday[]) => Promise<boolean>; onError: (message: string) => void;
 }) {
-  const [classroom, setClassroom] = useState(() => localStorage.getItem(classKey) || '');
   const saved = lists.find(item => item.classroom_id === classroom);
   const savedList = saved?.students ?? [];
   // An empty class starts with one blank row, ready to type or paste into.
@@ -32,7 +30,6 @@ export function BirthdayEditor({ classes, lists, drafts, setDrafts, now, ready, 
   const dirty = JSON.stringify(named) !== JSON.stringify(savedList.map(({ name, date }) => ({ name, date })));
   const edit = (next: BirthdayRow[]) => setDrafts(old => ({ ...old, [classroom]: next }));
   const change = (index: number, patch: Partial<BirthdayRow>) => edit(students.map((old, at) => at === index ? { ...old, ...patch } : old));
-  function pick(id: string) { setClassroom(id); localStorage.setItem(classKey, id); }
   // Several pasted lines replace this row and continue below it.
   function paste(index: number, e: ClipboardEvent<HTMLInputElement>) {
     const text = e.clipboardData.getData('text');
@@ -49,19 +46,10 @@ export function BirthdayEditor({ classes, lists, drafts, setDrafts, now, ready, 
       setDrafts(old => { const rest = { ...old }; delete rest[classroom]; return rest; });
   }
 
-  return <>
-    <section className="section">
-      <div className="section-heading">
-        <h1>生日</h1>
-        {classroom && <span className="muted">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</span>}
-      </div>
-      <div className="choice-row schedule-classes">
-        {classes.map(id => <button type="button" key={id} className={id === classroom ? 'active' : ''} aria-pressed={id === classroom} onClick={() => pick(id)}>{id}</button>)}
-      </div>
-    </section>
-    {classroom && <section className="section composer">
+  return <section className="section composer">
       <div className="section-heading"><div className="heading-title"><h2>{classroom} 学生生日</h2><span className="heading-hint">可粘贴 Excel 或拍照识别</span></div>
         <span className="character-count">{students.length} / {BIRTHDAY_LIMIT}</span></div>
+      <p className="muted birthday-updated">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</p>
       <ol className="entry-list birthday-list">{students.map((student, index) => <li key={index} className="entry-row">
           <span className="entry-number">{index + 1}</span>
           <Input aria-label={`第 ${index + 1} 位姓名`} placeholder="姓名" maxLength={40} value={student.name}
@@ -89,6 +77,5 @@ export function BirthdayEditor({ classes, lists, drafts, setDrafts, now, ready, 
           </Button>
         </div>
       </div>
-    </section>}
-  </>;
+    </section>;
 }
