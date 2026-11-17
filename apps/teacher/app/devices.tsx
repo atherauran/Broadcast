@@ -16,9 +16,9 @@ export function Devices({ rooms, now, ready, busy, onBack, onUnbind, onHide, onB
     <h1>教室设备</h1>
     <p className="muted device-intro">隐藏桌面会收起该班电脑上的公告、便签、课表等，恢复后原样显示；班主任设置密码后，只有班主任可以操作本班桌面。更换电脑前，可在这里解除原设备绑定。</p>
     {rooms.map(room => <div className="device-row" key={room.id}>
-      <div><strong>{room.id}</strong><p className="muted">{room.device_name || '未绑定设备'}{room.screen_hidden && <span className="screen-hidden"> · 桌面已隐藏</span>}</p>
-        {room.homeroom && <p className="muted">班主任 {room.homeroom.teacher_name}{room.homeroom.claimed ? '' : ' · 未设置密码'}
-          {muteStatus(room, now) && <span className="screen-hidden"> · 广播{muteStatus(room, now)}</span>}</p>}</div>
+      <div><strong>{room.id}</strong><p className="muted">{room.device_name || '未绑定设备'}{room.screen_hidden && <span className="screen-hidden">（桌面已隐藏）</span>}</p>
+        {room.homeroom && <p className="muted">班主任 {room.homeroom.teacher_name}{room.homeroom.claimed ? '' : '（未设置密码）'}</p>}
+        {muteStatus(room, now) && <p className="screen-hidden">广播{muteStatus(room, now)}</p>}</div>
       <div className="device-actions">
         <label className="bazaar-switch"><input type="checkbox" role="switch" aria-checked={room.bazaar_enabled !== false} aria-label={`${room.id} 义卖实时统计`}
           checked={room.bazaar_enabled !== false} disabled={!ready || !!busy}

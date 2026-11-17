@@ -49,7 +49,7 @@ export function BirthdayEditor({ classroom, lists, drafts, setDrafts, now, ready
   return <section className="section composer">
       <div className="section-heading"><div className="heading-title"><h2>{classroom} 学生生日</h2><span className="heading-hint">可粘贴 Excel 或拍照识别</span></div>
         <span className="character-count">{students.length} / {BIRTHDAY_LIMIT}</span></div>
-      <p className="muted birthday-updated">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</p>
+      <p className="muted birthday-updated">{saved ? `${saved.teacher_name} 于 ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</p>
       <ol className="entry-list birthday-list">{students.map((student, index) => <li key={index} className="entry-row">
           <span className="entry-number">{index + 1}</span>
           <Input aria-label={`第 ${index + 1} 位姓名`} placeholder="姓名" maxLength={40} value={student.name}

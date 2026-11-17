@@ -235,7 +235,7 @@ export function DateInput({ value, now, onChange }: { value: string; now: number
           onChange={e => e.target.value && edit(e.target.value)} />
       </span>
     </span>
-    {value && days >= 0 && <span className="muted">{weekday(new Date(`${value}T00:00`))} · {days ? `还有 ${days} 天` : '就是今天'}</span>}
+    {value && days >= 0 && <span className="muted">{weekday(new Date(`${value}T00:00`))}，{days ? `还有 ${days} 天` : '就是今天'}</span>}
   </>;
 }
 

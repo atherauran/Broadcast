@@ -375,8 +375,7 @@ export default function App() {
   const known = configured && !!session && live && network;
   const ready = configured && !!session && network && validTeacherName(teacherName);
   // The test class, and what was sent only there, exist for the maintainer alone.
-  // Temporarily shown to every teacher while homeroom features are tested.
-  const shown = (id: string) => maintainer || id !== TEST_CLASSROOM || true;
+  const shown = (id: string) => maintainer || id !== TEST_CLASSROOM;
   const visibleRooms = rooms.filter(room => shown(room.id));
   const classIds = visibleRooms.map(room => room.id);
   const adminClassroom = classIds.includes(classroom) ? classroom : '';
@@ -388,7 +387,8 @@ export default function App() {
   const myRoom = rooms.find(room => room.homeroom?.mine);
   const classRoom = rooms.find(room => room.id === adminClassroom);
   const classLocked = classRoom?.manage === false;
-  const showClaim = homeroom && !myRoom && !maintainer && (!homeroom.claimed || !claimSeen);
+  const homeroomAccount = !!session?.user.email?.startsWith('homeroom-');
+  const showClaim = homeroom && !homeroomAccount && !maintainer && (!homeroom.claimed || !claimSeen);
   useEffect(() => registerBroadcastTools(
     () => ({ connected: known, classrooms: rooms.map(room => ({ id: room.id, online: known ? isOnline(room, serverNow()) : null })) }),
     (text, targets) => { patch('alert', { body: text, sourceId: null }); setSelected(targets); setKind('alert'); setTab('send'); },
@@ -401,7 +401,7 @@ export default function App() {
     <header className="app-header">
       <div className="brand"><span className="brand-icon"><Radio size={22} /></span><span>校园广播</span></div>
       <div className="header-actions">
-        <span className="teacher-chip">{teacherName}{myRoom && ` · ${myRoom.id} 班主任`}</span>
+        <span className="teacher-chip">{teacherName}{myRoom && `（${myRoom.id} 班主任）`}</span>
         <Button variant="ghost" className="icon-action" aria-label="设备管理" onClick={() => setTab('devices')}><Settings2 size={20} /></Button>
         {session && <span className="feedback-anchor">
           <Button variant="ghost" className="icon-action" aria-label="反馈" onClick={() => openFeedback()}><MessageSquareText size={19} /></Button>

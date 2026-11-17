@@ -19,17 +19,19 @@ export function HomeroomPanel({ room, now, ready, busy, onHide, onMute }: {
   const [pausing, setPausing] = useState(false);
   const status = muteStatus(room, now);
   return <section className="section homeroom-panel">
-    <div className="section-heading"><h1>{room.id} 班主任</h1></div>
-    <div className="homeroom-row">
-      <div><strong>教室桌面</strong><p className="muted">{room.screen_hidden ? '已清屏，公告、便签、课表等已收起' : '正常显示'}</p></div>
-      <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onHide(!room.screen_hidden)}>
-        {room.screen_hidden ? '恢复桌面' : '一键清屏'}</Button>
-    </div>
-    <div className="homeroom-row">
-      <div><strong>其他老师的广播</strong><p className={status ? 'paused' : 'muted'}>{status || '正常接收'}</p></div>
-      {status
-        ? <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onMute(null, null)}>解除暂停</Button>
-        : <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => setPausing(true)}>暂停接收</Button>}
+    <h2>{room.id} 班主任</h2>
+    <div className="homeroom-controls">
+      <div className="homeroom-control">
+        <div><strong>教室桌面</strong><p className={room.screen_hidden ? 'paused' : 'muted'}>{room.screen_hidden ? '已清屏' : '正常显示'}</p></div>
+        <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onHide(!room.screen_hidden)}>
+          {room.screen_hidden ? '恢复桌面' : '一键清屏'}</Button>
+      </div>
+      <div className="homeroom-control">
+        <div><strong>其他老师的广播</strong><p className={status ? 'paused' : 'muted'}>{status || '正常接收'}</p></div>
+        {status
+          ? <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onMute(null, null)}>解除暂停</Button>
+          : <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => setPausing(true)}>暂停接收</Button>}
+      </div>
     </div>
     {pausing && <MuteDialog classroom={room.id} now={now} busy={busy} onClose={() => setPausing(false)}
       onConfirm={(from, until) => onMute(from, until).then(ok => { if (ok) setPausing(false); })} />}
@@ -89,7 +91,7 @@ export function ClaimPrompt({ classroom, claimed, busy, onClaim, onDismiss }: {
     <AlertDialog open={open} onOpenChange={next => { if (!next && !busy) setOpen(false); }}>
       <AlertDialogContent className="confirm-card">
         <AlertDialogTitle>设置 {classroom} 班主任密码</AlertDialogTitle>
-        <AlertDialogDescription>以后登录时，填写您的姓名和这个密码即可。请不要使用大家共用的密码。</AlertDialogDescription>
+        <AlertDialogDescription>以后登录时，填写您的名字和这个密码即可。请不要使用大家共用的密码。</AlertDialogDescription>
         <form className="claim-form" onSubmit={e => { e.preventDefault(); void onClaim(password).then(ok => { if (ok) setOpen(false); }); }}>
           <Input type="password" className="login-input" autoComplete="new-password" aria-label="新密码" placeholder="新密码" value={password} onChange={e => setPassword(e.target.value)} />
           <Input type="password" className="login-input" autoComplete="new-password" aria-label="再次输入" placeholder="再次输入" value={repeat} onChange={e => setRepeat(e.target.value)} />

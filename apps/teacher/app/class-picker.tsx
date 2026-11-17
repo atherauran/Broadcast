@@ -3,7 +3,7 @@ import { isOnline, muted, type Classroom } from '@/lib/domain';
 
 export function roomStatus(room: Classroom, known: boolean, now: number): string {
   if (!known) return '状态待确认';
-  return isOnline(room, now) ? '在线' : room.device_id ? '离线' : '离线 · 未绑定';
+  return isOnline(room, now) ? '在线' : room.device_id ? '离线' : '离线，未绑定';
 }
 
 // With broadcasts, classes whose homeroom teacher paused them say so; the server leaves them out.
@@ -15,7 +15,7 @@ export function ClassPicker({ rooms, known, now, selected, setSelected, broadcas
   const toggle = (id: string) => setSelected(old => old.includes(id) ? old.filter(other => other !== id) : [...old, id]);
   return <section className="section classrooms-section">
     <div className="section-heading">
-      <div className="heading-title"><h1>选择班级</h1><span className="muted">{known ? `${rooms.filter(r => isOnline(r, now)).length} / ${total} 个班级在线` : `8 年级 · 共 ${total} 个班级`}</span></div>
+      <div className="heading-title"><h1>选择班级</h1><span className="muted">{known ? `${rooms.filter(r => isOnline(r, now)).length} / ${total} 个班级在线` : `8 年级共 ${total} 个班级`}</span></div>
       <button className="select-all" onClick={() => setSelected(() => all ? [] : rooms.map(room => room.id))}>{all ? <Check size={17} /> : <Square size={17} />}{all ? '取消全选' : '全选'}</button>
     </div>
     <div className="class-grid">{rooms.map(room => {

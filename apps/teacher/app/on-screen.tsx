@@ -10,11 +10,11 @@ const icons = { board: ClipboardList, note: StickyNote, countdown: Timer };
 const kindLabel = { board: '公告板', note: '便签', countdown: '倒计时' };
 
 function summary(item: DisplayItem, now: number): string {
-  if (item.kind === 'board') return `${item.content.title} · ${item.content.entries.length} 条`;
+  if (item.kind === 'board') return `${item.content.title}（${item.content.entries.length} 条）`;
   if (item.kind === 'note') return item.content.text;
   const label = item.content.label || '倒计时';
-  if (item.content.date) { const days = daysUntil(item.content.date, now); return `${label} · ${days ? `还有 ${days} 天` : '就是今天'}`; }
-  return `${label} · 剩余 ${remaining(Date.parse(item.ends_at) - now)}`;
+  if (item.content.date) { const days = daysUntil(item.content.date, now); return `${label}，${days ? `还有 ${days} 天` : '就是今天'}`; }
+  return `${label}，剩余 ${remaining(Date.parse(item.ends_at) - now)}`;
 }
 
 // Sends the ticked items, with their start and end, to the classes picked here.

@@ -42,7 +42,7 @@ export function ScheduleEditor({ classroom, schedules, drafts, setDrafts, now, r
   return <section className="section composer">
       <div className="section-heading">
         <h2>{classroom} 课表/值日</h2>
-        <span className="muted">{saved ? `${saved.teacher_name} · ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</span>
+        <span className="muted">{saved ? `${saved.teacher_name} 于 ${clockText(saved.updated_at, now)} 更新` : '尚未设置'}</span>
       </div>
       <div className="day-tabs" aria-label="星期">{SCHOOL_DAYS.map((label, at) => <button type="button" key={label} className={at === day ? 'active' : ''}
         aria-pressed={at === day} onClick={() => setDay(at)}>{label}<small>{week[at].length ? `${week[at].length} 节` : '空'}</small></button>)}</div>

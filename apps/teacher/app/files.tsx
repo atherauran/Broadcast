@@ -18,7 +18,7 @@ export function Files({ rooms, known, now, ready, busy, history, hasMore, onMore
     <section className="section file-upload">
       <div className="section-heading"><h1>文件传输</h1></div>
       <p className="muted">将自动保存到教室电脑桌面，每次一个文件，最大 10 MB</p>
-      <label className="file-input-label" htmlFor="classroom-file"><FileUp size={22} /><span>{file ? `${file.name} · ${fileSize(file.size)}` : '选择文件'}</span>
+      <label className="file-input-label" htmlFor="classroom-file"><FileUp size={22} /><span>{file ? `${file.name}（${fileSize(file.size)}）` : '选择文件'}</span>
       <input ref={input} id="classroom-file" className="file-input" type="file" disabled={!!busy} onChange={event => {
         const picked = event.target.files?.[0];
         if (!picked) return;
