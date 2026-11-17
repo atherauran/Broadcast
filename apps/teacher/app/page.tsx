@@ -5,9 +5,9 @@ import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, FileUp, LogOut, M
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { registerBroadcastTools } from '@/lib/webmcp';
-import { adminEmail, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getOverview, getSchedules, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
+import { adminEmail, claimHomeroom, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getOverview, getSchedules, homeroomEmail, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
 import type { FileTransfer } from '@/lib/files';
-import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, isOnline, localInput, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, isOnline, localInput, muted, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
   type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Timetable } from '@/lib/domain';
 import { Login } from './login';
@@ -20,12 +20,14 @@ import { BirthdayEditor, type BirthdayRow } from './birthdays';
 import { ScheduleEditor } from './schedule';
 import { FeedbackDialog, FeedbackNews } from './feedback';
 import { Files } from './files';
+import { ClaimPrompt, HomeroomPanel } from './homeroom';
 
 const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
 const teacherKey = 'broadcast-teacher-session-v2';
 const rememberedTeacher = () => localStorage.getItem(teacherKey)?.trim() || '';
 const introKey = 'broadcast-feedback-intro';
+const claimSeenKey = 'broadcast-homeroom-claimed-seen';
 // The newest feedback activity each teacher name has seen in this browser.
 const seenKey = 'broadcast-feedback-seen';
 const readSeen = (): Record<string, string> => { try { return JSON.parse(localStorage.getItem(seenKey) || '{}'); } catch { return {}; } };
@@ -64,6 +66,10 @@ export default function App() {
   const [latestId, setLatestId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  // The class whose homeroom teacher signs with the current name.
+  const [homeroom, setHomeroom] = useState<{ classroom_id: string; claimed: boolean } | null>(null);
+  const [claimSeen, setClaimSeen] = useState(() => !!localStorage.getItem(claimSeenKey));
   const [busy, setBusy] = useState('');
   // A fullscreen send during a lesson waits for the teacher's confirmation.
   const [confirmLesson, setConfirmLesson] = useState(false);
@@ -194,11 +200,18 @@ export default function App() {
     document.addEventListener('visibilitychange', resume);
     return () => { disposed = true; document.removeEventListener('visibilitychange', resume); void supabase!.removeChannel(channel); };
   }, [userId, network, refreshRooms, refreshOverview, refreshFeedback, refreshFiles, mergeHistory]);
+  useEffect(() => {
+    if (!userId || !network || !validTeacherName(teacherName)) return;
+    let current = true;
+    void rpc<{ classroom_id: string; claimed: boolean } | null>('homeroom_for_name', { p_name: teacherName })
+      .then(match => { if (current) setHomeroom(match); }).catch(() => {});
+    return () => { current = false; };
+  }, [userId, network, teacherName]);
   useEffect(() => { localStorage.setItem('broadcast-draft', drafts.alert.body); }, [drafts.alert.body]);
   const patch: Patch = useCallback((key, change) => setDrafts(old => ({ ...old, [key]: { ...old[key], ...change } })), []);
 
   async function run(name: string, action: () => Promise<void>): Promise<boolean> {
-    setBusy(name); setError('');
+    setBusy(name); setError(''); setNotice('');
     try { await action(); return true; } catch (e) { setError(message(e)); return false; } finally { setBusy(''); }
   }
   function logout() {
@@ -206,15 +219,20 @@ export default function App() {
       const { error } = await supabase!.auth.signOut({ scope: 'local' });
       if (error) throw error;
       localStorage.removeItem(teacherKey);
-      setTeacherName(''); setSignAs(null); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms); setFeedback(null); setFeedbackOpen(null);
+      setTeacherName(''); setSignAs(null); setHomeroom(null); setHistory([]); setOverview([]); setBoardDrafts([]); setSchedules([]); setWeekDrafts({}); setBirthdays([]); setBirthdayDrafts({}); setRooms(emptyRooms); setFeedback(null); setFeedbackOpen(null);
     });
   }
   async function login() {
     if (!validTeacherName(loginName)) { setError('请输入 1–40 字老师姓名'); return; }
     await run('login', async () => {
-      let result = await supabase!.auth.signInWithPassword({ email: adminEmail, password });
-      // The maintainer signs in on the same form with their own password.
-      if (result.error) result = await supabase!.auth.signInWithPassword({ email: maintainerEmail, password });
+      // A homeroom teacher who set a password has their own account; everyone else shares one, and the maintainer has theirs.
+      const match = await rpc<{ classroom_id: string; claimed: boolean } | null>('homeroom_for_name', { p_name: loginName });
+      const emails = [...match?.claimed ? [homeroomEmail(match.classroom_id)] : [], adminEmail, maintainerEmail];
+      let result!: Awaited<ReturnType<NonNullable<typeof supabase>['auth']['signInWithPassword']>>;
+      for (const email of emails) {
+        result = await supabase!.auth.signInWithPassword({ email, password });
+        if (!result.error) break;
+      }
       if (result.error) throw new Error('密码不正确或登录服务暂不可用');
       if (result.data.user.app_metadata.role !== 'admin') { await supabase!.auth.signOut(); throw new Error('此账号没有管理员权限'); }
       const name = loginName.trim();
@@ -222,11 +240,17 @@ export default function App() {
     });
   }
   const sender = (signAs ?? teacherName).trim();
+  const hideScreen = (room: Classroom, hidden: boolean) => run('hide', async () => {
+    await rpc('set_screen_hidden', { p_classroom: room.id, p_hidden: hidden });
+    setRooms(old => old.map(item => item.id === room.id ? { ...item, screen_hidden: hidden } : item));
+  });
   async function sendBroadcast(input: Record<string, unknown>) {
     const classrooms = [...selected].sort();
+    const paused = rooms.filter(room => classrooms.includes(room.id) && muted(room, now) && !room.own).map(room => room.id);
     const id = await once('broadcast-attempt', [input, classrooms, sender], id =>
       rpc<string>('create_broadcast', { p_id: id, p_classrooms: classrooms, p_teacher_name: sender, ...input }));
     setLatestId(id);
+    if (paused.length) setNotice(`${paused.join('、')} 班主任已暂停接收广播，未发送到${paused.length > 1 ? '这些' : '该'}班`);
     // While live, the new delivery rows arrive over Realtime and fetch this broadcast themselves.
     if (!live) await getHistory(null, id).then(mergeHistory).catch(() => setError('广播已创建，回执暂时无法读取，请检查历史记录'));
   }
@@ -360,6 +384,10 @@ export default function App() {
   const visibleHistory = maintainer ? history
     : history.map(item => ({ ...item, deliveries: item.deliveries.filter(d => shown(d.classroom_id)) })).filter(item => item.deliveries.length);
   const latest = visibleHistory.find(b => b.id === latestId);
+  const myRoom = rooms.find(room => room.homeroom?.mine);
+  const classRoom = rooms.find(room => room.id === adminClassroom);
+  const classLocked = classRoom?.manage === false;
+  const showClaim = homeroom && !myRoom && !maintainer && (!homeroom.claimed || !claimSeen);
   useEffect(() => registerBroadcastTools(
     () => ({ connected: known, classrooms: rooms.map(room => ({ id: room.id, online: known ? isOnline(room, serverNow()) : null })) }),
     (text, targets) => { patch('alert', { body: text, sourceId: null }); setSelected(targets); setKind('alert'); setTab('send'); },
@@ -372,7 +400,7 @@ export default function App() {
     <header className="app-header">
       <div className="brand"><span className="brand-icon"><Radio size={22} /></span><span>校园广播</span></div>
       <div className="header-actions">
-        <span className="teacher-chip">{teacherName}</span>
+        <span className="teacher-chip">{teacherName}{myRoom && ` · ${myRoom.id} 班主任`}</span>
         <Button variant="ghost" className="icon-action" aria-label="设备管理" onClick={() => setTab('devices')}><Settings2 size={20} /></Button>
         {session && <span className="feedback-anchor">
           <Button variant="ghost" className="icon-action" aria-label="反馈" onClick={() => openFeedback()}><MessageSquareText size={19} /></Button>
@@ -394,8 +422,17 @@ export default function App() {
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
       {configured && !known && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
       {error && <div className="feedback error" role="alert">{error}<button aria-label="关闭提示" onClick={() => setError('')}><X size={17} /></button></div>}
+      {notice && <div className="feedback info">{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}><X size={17} /></button></div>}
+      {showClaim && <ClaimPrompt classroom={homeroom.classroom_id} claimed={homeroom.claimed} busy={busy}
+        onDismiss={() => { localStorage.setItem(claimSeenKey, '1'); setClaimSeen(true); }}
+        onClaim={password => run('claim', () => claimHomeroom(homeroom.classroom_id, password))} />}
       {sw.needRefresh[0] && <div className="feedback info">有新版本可用<Button variant="link" onClick={() => void sw.updateServiceWorker(true)} disabled={!!busy}>更新应用</Button></div>}
       {tab === 'send' && <>
+        {myRoom && <HomeroomPanel room={myRoom} now={now} ready={ready} busy={busy} onHide={hidden => hideScreen(myRoom, hidden)}
+          onMute={(from, until) => run('mute', async () => {
+            await rpc('set_broadcast_mute', { p_classroom: myRoom.id, p_from: from, p_until: until });
+            await refreshRooms();
+          })} />}
         <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
           saved={savedBoards(visibleDrafts, visibleOverview, now)} teacherName={teacherName} signAs={signAs ?? teacherName} setSignAs={setSignAs} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
@@ -456,27 +493,25 @@ export default function App() {
               onClick={() => setClassSection('birthdays')}><Cake size={17} />生日</button>
           </div>
         </section>
-        {adminClassroom && classSection === 'schedule' && <ScheduleEditor classroom={adminClassroom} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready} busy={busy} onError={setError}
+        {classLocked && <div className="feedback info">只有 {adminClassroom} 班主任{classRoom.homeroom && ` ${classRoom.homeroom.teacher_name}`} 可以修改本班课表、值日和生日</div>}
+        {adminClassroom && classSection === 'schedule' && <ScheduleEditor classroom={adminClassroom} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready && !classLocked} busy={busy} onError={setError}
           onSave={(classroom, { days, duties }) => run('schedule', async () => {
             await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
             setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
           })} />}
-        {adminClassroom && classSection === 'birthdays' && <BirthdayEditor classroom={adminClassroom} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready} busy={busy}
+        {adminClassroom && classSection === 'birthdays' && <BirthdayEditor classroom={adminClassroom} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready && !classLocked} busy={busy}
           onError={setError} onSave={(classroom, students) => run('birthdays', async () => {
             await rpc('set_birthdays', { p_classroom: classroom, p_students: students, p_teacher_name: teacherName });
             setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
           })} />}
       </>}
-      {tab === 'devices' && <Devices rooms={visibleRooms} ready={ready} busy={busy} onBack={() => setTab('send')}
+      {tab === 'devices' && <Devices rooms={visibleRooms} now={now} ready={ready} busy={busy} onBack={() => setTab('send')}
         onBazaar={(room, enabled) => run('bazaar', async () => {
           await rpc('set_bazaar_enabled', { p_classroom: room.id, p_enabled: enabled });
           setRooms(old => old.map(item => item.id === room.id ? { ...item, bazaar_enabled: enabled } : item));
         })}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })}
-        onHide={(room, hidden) => run('hide', async () => {
-          await rpc('set_screen_hidden', { p_classroom: room.id, p_hidden: hidden });
-          setRooms(old => old.map(item => item.id === room.id ? { ...item, screen_hidden: hidden } : item));
-        })} />}
+        onHide={hideScreen} />}
     </main>
     {feedbackOpen && <FeedbackDialog items={feedback ?? []} maintainer={maintainer} focus={feedbackOpen.focus} onClose={closeFeedback}
       onSubmit={submitFeedback} onComment={commentFeedback} onStatus={setFeedbackStatus} />}

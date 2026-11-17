@@ -625,3 +625,58 @@ describe('bazaar income ledger', () => {
     await identity(second); expect(await state()).toEqual({ classroom_id: '8-2', enabled: true, entries });
   });
 });
+
+describe('homeroom teachers', () => {
+  const homeroom = '30000000-0000-4000-8000-000000000001';
+  const maintainer = '30000000-0000-4000-8000-000000000002';
+  const send = (targets: string[]) => db.query('select create_broadcast($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+    [crypto.randomUUID(), '请到操场集合。', targets, null, '王老师', 0, true, 'normal', 101001, 'fullscreen', 'top']).then(r => Object.values(r.rows[0] as object)[0] as string);
+  const classes = async (id: string) => { await identity(admin, 'admin'); return (await db.query<{ classroom_id: string }>('select classroom_id from deliveries where broadcast_id=$1 order by 1', [id])).rows.map(r => r.classroom_id); };
+  beforeAll(async () => {
+    await db.exec(`reset role; insert into auth.users values ('${homeroom}'),('${maintainer}');
+      insert into homerooms(classroom_id, teacher_name, aliases) values ('8-3', 'Ms.Tong', '{"童老师"}');`);
+  });
+  it('matches names ignoring case, spaces and dots, before sign-in too', async () => {
+    await db.exec('reset role; set role anon');
+    expect(await scalar('select homeroom_for_name($1)', ['ms. tong'])).toEqual({ classroom_id: '8-3', claimed: false });
+    expect(await scalar('select homeroom_for_name($1)', ['童老师'])).toEqual({ classroom_id: '8-3', claimed: false });
+    expect(await scalar('select homeroom_for_name($1)', ['王老师'])).toBeNull();
+    await expect(db.query('select * from homerooms')).rejects.toThrow();
+  });
+  it('keeps an unclaimed class open to every teacher, then only to its homeroom teacher and the maintainer', async () => {
+    const week = JSON.stringify([[], [], [], [], []]);
+    await identity(admin, 'admin'); await db.query("select set_screen_hidden('8-3', true)");
+    await expect(db.query("select set_broadcast_mute('8-3', null, clock_timestamp() + interval '1 hour')")).rejects.toThrow('班主任');
+    await db.exec(`reset role; update homerooms set user_id = '${homeroom}', claimed_at = now() where classroom_id = '8-3'`);
+    await identity(admin, 'admin');
+    await expect(db.query("select set_screen_hidden('8-3', false)")).rejects.toThrow('只有 8-3 班主任');
+    await expect(db.query("select set_schedule('8-3', $1, '王老师')", [week])).rejects.toThrow('只有 8-3 班主任');
+    await expect(db.query(`select set_birthdays('8-3', '[]', '王老师')`)).rejects.toThrow('只有 8-3 班主任');
+    await db.query("select set_screen_hidden('8-4', true)");
+    const rooms = await scalar<Array<Record<string, unknown>>>("select classroom_status()->'classrooms'");
+    expect(rooms.find(r => r.id === '8-3')).toMatchObject({ manage: false, own: false, homeroom: { teacher_name: 'Ms.Tong', claimed: true, mine: false } });
+    await identity(homeroom, 'admin');
+    await db.query("select set_screen_hidden('8-3', false)"); await db.query("select set_schedule('8-3', $1, 'Ms.Tong')", [week]);
+    expect((await scalar<Array<Record<string, unknown>>>("select classroom_status()->'classrooms'")).find(r => r.id === '8-3'))
+      .toMatchObject({ manage: true, own: true, homeroom: { mine: true } });
+    await identity(maintainer, 'admin', true);
+    await db.query("select set_screen_hidden('8-3', true)"); await db.query("select set_screen_hidden('8-3', false)"); await db.query("select set_screen_hidden('8-4', false)");
+    await db.exec("reset role; delete from schedules where classroom_id = '8-3'");
+  });
+  it('leaves a paused class out of other teachers broadcasts during the chosen range', async () => {
+    await identity(homeroom, 'admin');
+    await expect(db.query("select set_broadcast_mute('8-3', null, clock_timestamp() - interval '1 minute')")).rejects.toThrow('暂停时间无效');
+    await db.query("select set_broadcast_mute('8-3', clock_timestamp() + interval '1 hour', clock_timestamp() + interval '2 hours')");
+    await identity(admin, 'admin'); expect(await classes(await send(['8-3']))).toEqual(['8-3']);
+    await identity(homeroom, 'admin'); await db.query("select set_broadcast_mute('8-3', null, clock_timestamp() + interval '1 hour')");
+    await identity(admin, 'admin');
+    await expect(send(['8-3'])).rejects.toThrow('8-3 班主任已暂停接收广播');
+    expect(await classes(await send(['8-3', '8-4']))).toEqual(['8-4']);
+    await identity(homeroom, 'admin'); expect(await classes(await send(['8-3']))).toEqual(['8-3']);
+    await identity(maintainer, 'admin', true); expect(await classes(await send(['8-3']))).toEqual(['8-3']);
+    await identity(admin, 'admin'); await expect(db.query("select set_broadcast_mute('8-3', null, null)")).rejects.toThrow('班主任');
+    await identity(homeroom, 'admin'); await db.query("select set_broadcast_mute('8-3', null, null)");
+    await identity(admin, 'admin'); expect(await classes(await send(['8-3']))).toEqual(['8-3']);
+    await expect(db.query("select create_broadcast_unchecked($1,'x',$2,null,'王老师',0,true,'normal',101001,'fullscreen','top')", [crypto.randomUUID(), ['8-3']])).rejects.toThrow();
+  });
+});

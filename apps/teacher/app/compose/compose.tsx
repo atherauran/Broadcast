@@ -47,7 +47,7 @@ export function Compose({ kind, setKind, rooms, known, now, selected, setSelecte
       return <button key={item.id} type="button" aria-pressed={kind === item.id} className={'kind-card ' + (kind === item.id ? 'selected' : '')}
         onClick={() => setKind(item.id)}><Icon size={22} />{item.label}</button>;
     })}</div></section>
-    <ClassPicker rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected} />
+    <ClassPicker rooms={rooms} known={known} now={now} selected={selected} setSelected={setSelected} broadcast={kind === 'alert' || kind === 'banner'} />
     <section className="section composer">
       {kind === 'alert' && <AlertForm draft={drafts.alert} onChange={change => patch('alert', change)} onError={onError} />}
       {kind === 'banner' && <BannerForm draft={drafts.banner} onChange={change => patch('banner', change)} />}

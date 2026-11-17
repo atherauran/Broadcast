@@ -5,6 +5,15 @@ export const configured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.en
 export const supabase = configured ? createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY) : null;
 export const adminEmail = import.meta.env.VITE_ADMIN_EMAIL || 'admin@broadcast.local';
 export const maintainerEmail = import.meta.env.VITE_MAINTAINER_EMAIL || 'maintainer@broadcast.local';
+export const homeroomEmail = (classroom: string) => `homeroom-${classroom}@broadcast.local`;
+// Sets the homeroom teacher's own password and returns their new account's session.
+export async function claimHomeroom(classroom: string, password: string) {
+  if (!supabase) throw new Error('广播服务尚未配置');
+  const { data, error } = await supabase.functions.invoke('broadcast-api', { body: { action: 'claim-homeroom', classroom_id: classroom, password } });
+  if (error) throw new Error((await error.context?.json?.().catch(() => null))?.error || error.message);
+  const { error: sessionError } = await supabase.auth.setSession(data.session);
+  if (sessionError) throw sessionError;
+}
 export async function rpc<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
   if (!supabase) throw new Error('广播服务尚未配置');
   const { data, error } = await supabase.rpc(name, args);

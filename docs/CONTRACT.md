@@ -76,6 +76,18 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 `classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. Classroom apps that predate it pick the change up on their next periodic `display_state` check (at most about 40 seconds); newer ones also subscribe to `classrooms` UPDATEs and refresh at once.
 
+## Homeroom teachers
+
+`homerooms` lists at most one homeroom teacher per class: `classroom_id`, `teacher_name`, `aliases` (other names they sign with), nullable `user_id` and `claimed_at`. Rows are entered by hand in Supabase (not in migrations, since this repository is public). Clients have no table access; names match through `name_key`, which ignores case, spaces and dots.
+
+- `homeroom_for_name(p_name)` (anon and authenticated) returns `{classroom_id, claimed}` or null. The login page uses it to try `homeroom-<class>@broadcast.local` before the shared admin and maintainer accounts; the teacher app uses it to prompt an unclaimed homeroom teacher on the shared account to set a password.
+- The Edge Function action `claim-homeroom` (`classroom_id`, `password`, 6–72 characters, not the caller's shared password) is admin-only. It creates the class's admin account, stores it in `user_id` once (a class cannot be claimed twice) and returns its `session`, which the teacher app adopts without a new sign-in. To reset a claim, delete that Auth user; `user_id` then becomes null.
+- `can_manage(class)`: any admin while the class is unclaimed, then only its homeroom account and the maintainer. `set_screen_hidden`, `set_schedule` and `set_birthdays` require it.
+- `set_broadcast_mute(p_classroom, p_from, p_until)` is for the class's homeroom account and the maintainer only. It stores `classrooms.mute_from`/`mute_until` (null `p_from` means now, null `p_until` lifts the pause; the end must be in the future, within 400 days). During the range, `create_broadcast` from anyone else leaves the class out of the deliveries, and refuses a request whose targets are all paused. Display items and files are unaffected.
+- `classroom_status` adds `mute_from`, `mute_until`, `manage`, `own` (homeroom account or maintainer) and `homeroom` (`{teacher_name, claimed, mine}` or null) to each class.
+
+`create_broadcast`, `set_schedule` and `set_birthdays` wrap the former functions, renamed `*_unchecked` and no longer callable by clients. The classroom app needs no update.
+
 ## Teacher names
 
 `p_teacher_name` on `create_broadcast`, `create_display_item` and `save_board_draft` is the name the classroom shows. The teacher app sends the signed-in teacher's name unless the teacher types another one into the 署名 field for that send.

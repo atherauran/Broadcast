@@ -3,9 +3,10 @@ import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import type { Classroom } from '@/lib/domain';
+import { muteStatus } from './homeroom';
 
-export function Devices({ rooms, ready, busy, onBack, onUnbind, onHide, onBazaar }: {
-  rooms: Classroom[]; ready: boolean; busy: string; onBack: () => void; onUnbind: (room: Classroom) => Promise<boolean>;
+export function Devices({ rooms, now, ready, busy, onBack, onUnbind, onHide, onBazaar }: {
+  rooms: Classroom[]; now: number; ready: boolean; busy: string; onBack: () => void; onUnbind: (room: Classroom) => Promise<boolean>;
   onHide: (room: Classroom, hidden: boolean) => Promise<boolean>;
   onBazaar: (room: Classroom, enabled: boolean) => Promise<boolean>;
 }) {
@@ -13,14 +14,16 @@ export function Devices({ rooms, ready, busy, onBack, onUnbind, onHide, onBazaar
   return <section className="section devices-panel">
     <Button variant="ghost" className="back-button" onClick={onBack}><ArrowLeft size={18} />返回广播</Button>
     <h1>教室设备</h1>
-    <p className="muted device-intro">隐藏桌面会收起该班电脑上的公告、便签、课表等，恢复后原样显示。更换电脑前，可在这里解除原设备绑定。</p>
+    <p className="muted device-intro">隐藏桌面会收起该班电脑上的公告、便签、课表等，恢复后原样显示；班主任设置密码后，只有班主任可以操作本班桌面。更换电脑前，可在这里解除原设备绑定。</p>
     {rooms.map(room => <div className="device-row" key={room.id}>
-      <div><strong>{room.id}</strong><p className="muted">{room.device_name || '未绑定设备'}{room.screen_hidden && <span className="screen-hidden"> · 桌面已隐藏</span>}</p></div>
+      <div><strong>{room.id}</strong><p className="muted">{room.device_name || '未绑定设备'}{room.screen_hidden && <span className="screen-hidden"> · 桌面已隐藏</span>}</p>
+        {room.homeroom && <p className="muted">班主任 {room.homeroom.teacher_name}{room.homeroom.claimed ? '' : ' · 未设置密码'}
+          {muteStatus(room, now) && <span className="screen-hidden"> · 广播{muteStatus(room, now)}</span>}</p>}</div>
       <div className="device-actions">
         <label className="bazaar-switch"><input type="checkbox" role="switch" aria-checked={room.bazaar_enabled !== false} aria-label={`${room.id} 义卖实时统计`}
           checked={room.bazaar_enabled !== false} disabled={!ready || !!busy}
           onChange={event => void onBazaar(room, event.target.checked)} />义卖实时统计</label>
-        <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onHide(room, !room.screen_hidden)}>{room.screen_hidden ? '恢复桌面' : '隐藏桌面'}</Button>
+        <Button variant="outline" className="action" disabled={!ready || !!busy || room.manage === false} onClick={() => void onHide(room, !room.screen_hidden)}>{room.screen_hidden ? '恢复桌面' : '隐藏桌面'}</Button>
         <Button variant="outline" className="action" disabled={!room.device_id || !ready} onClick={() => setConfirmRoom(room)}>解绑</Button>
       </div>
     </div>)}

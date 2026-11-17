@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import App from '../app/page';
 import { OnScreen } from '../app/on-screen';
 import { Devices } from '../app/devices';
+import { HomeroomPanel } from '../app/homeroom';
 import { SavedBoards } from '../app/compose/saved-boards';
 import { CLASSROOM_IDS, type Classroom, type DisplayItem, type SavedBoard } from '../lib/domain';
 
@@ -63,7 +64,7 @@ it('signs every type with the teacher\'s own name unless changed', async () => {
 it('hides and restores a classroom desktop with one click', async () => {
   const onHide = vi.fn().mockResolvedValue(true);
   const room: Classroom = { id: '8-1', device_id: 'pc', device_name: '8-1 电脑', connected: true, last_seen_at: null };
-  const render = (screen_hidden: boolean) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden }], ready: true, busy: '',
+  const render = (screen_hidden: boolean) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden }], now: 0, ready: true, busy: '',
     onBack: vi.fn(), onUnbind: vi.fn(), onHide, onBazaar: vi.fn() })));
   await render(false);
   await click('隐藏桌面'); expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), true);
@@ -75,7 +76,7 @@ it('defaults bazaar display to on and toggles it separately for each class', asy
   const onBazaar = vi.fn().mockResolvedValue(true);
   const rooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
   const render = (enabled?: boolean, busy = '') => act(async () => root.render(createElement(Devices, {
-    rooms: rooms.map((room, i) => i === 0 ? { ...room, bazaar_enabled: enabled } : room), ready: true, busy,
+    rooms: rooms.map((room, i) => i === 0 ? { ...room, bazaar_enabled: enabled } : room), now: 0, ready: true, busy,
     onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onBazaar,
   })));
   await render();
@@ -321,4 +322,28 @@ it('combines birthdays and schedules under class affairs with one class selectio
   await click('发布'); await click('班务');
   expect(host.textContent).toContain('8-2 学生生日');
   expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位姓名"]')!.value).toBe('张三');
+});
+it('lets a homeroom teacher clear the screen and lift a pause', async () => {
+  const onHide = vi.fn().mockResolvedValue(true);
+  const onMute = vi.fn().mockResolvedValue(true);
+  const now = Date.parse('2026-11-18T02:00:00Z');
+  const room: Classroom = { id: '8-2', device_id: 'pc', device_name: null, connected: true, last_seen_at: null, own: true, manage: true,
+    mute_from: '2026-11-18T01:00:00Z', mute_until: '2026-11-18T09:00:00Z' };
+  await act(async () => root.render(createElement(HomeroomPanel, { room, now, ready: true, busy: '', onHide, onMute })));
+  expect(host.textContent).toContain('暂停中');
+  await click('一键清屏'); expect(onHide).toHaveBeenCalledWith(true);
+  await click('解除暂停'); expect(onMute).toHaveBeenCalledWith(null, null);
+  await act(async () => root.render(createElement(HomeroomPanel, { room: { ...room, mute_until: '2026-11-18T01:30:00Z' }, now, ready: true, busy: '', onHide, onMute })));
+  expect(host.textContent).toContain('正常接收');
+  await click('暂停接收');
+  await click('暂停', document.body);
+  expect(onMute).toHaveBeenLastCalledWith(null, expect.any(String));
+});
+it('locks the desktop switch of a class claimed by another homeroom teacher', async () => {
+  const room: Classroom = { id: '8-2', device_id: 'pc', device_name: null, connected: true, last_seen_at: null, manage: false,
+    homeroom: { teacher_name: 'Mr. Steven', claimed: true, mine: false } };
+  await act(async () => root.render(createElement(Devices, { rooms: [room], now: 0, ready: true, busy: '',
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onBazaar: vi.fn() })));
+  expect(host.textContent).toContain('班主任 Mr. Steven');
+  expect([...host.querySelectorAll('button')].find(b => b.textContent === '隐藏桌面')!.disabled).toBe(true);
 });

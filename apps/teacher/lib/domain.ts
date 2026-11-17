@@ -29,7 +29,12 @@ export const BOARD_TEMPLATES = [{ label: '晨会通知', title: '晨会通知', 
 export interface Classroom {
   id: string; device_id: string | null; device_name: string | null;
   last_seen_at: string | null; connected: boolean; screen_hidden?: boolean; bazaar_enabled?: boolean;
+  // manage: may clear the screen and edit class data; own: this class's homeroom account (or the maintainer).
+  mute_from?: string | null; mute_until?: string | null; manage?: boolean; own?: boolean;
+  homeroom?: { teacher_name: string; claimed: boolean; mine: boolean } | null;
 }
+// Whether the class's homeroom teacher has paused broadcasts at this time.
+export const muted = (room: Classroom, now: number) => !!room.mute_from && !!room.mute_until && Date.parse(room.mute_from) <= now && now < Date.parse(room.mute_until);
 export interface Delivery {
   id: string; classroom_id: string; device_id: string | null; online_at_send: boolean;
   received_at: string | null; started_at: string | null; displayed_at: string | null;

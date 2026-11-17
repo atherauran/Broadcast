@@ -56,6 +56,30 @@ Deno.serve(async (request) => {
         throw error;
       }
     }
+    if (input.action === 'claim-homeroom') {
+      const classroom = validateTargets([input.classroom_id])[0];
+      const password = typeof input.password === 'string' ? input.password : '';
+      if (password.length < 6 || password.length > 72) throw new Error('密码需要 6–72 位');
+      const { data: row, error } = await service.from('homerooms').select('user_id').eq('classroom_id', classroom).maybeSingle();
+      if (error) throw error;
+      if (!row) throw new Error(`${classroom} 没有登记班主任`);
+      if (row.user_id) throw new Error(`${classroom} 班主任已设置过密码`);
+      const anon = () => createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
+      // With the shared password, anyone signing with this teacher's name would get their account.
+      if (user.email && !(await anon().auth.signInWithPassword({ email: user.email, password })).error) throw new Error('不能使用共用密码');
+      const email = `homeroom-${classroom}@broadcast.local`;
+      const created = await service.auth.admin.createUser({ email, password, email_confirm: true, app_metadata: { role: 'admin' } });
+      if (created.error) throw created.error;
+      const { data: claimed, error: claimError } = await service.from('homerooms')
+        .update({ user_id: created.data.user.id, claimed_at: new Date().toISOString() }).eq('classroom_id', classroom).is('user_id', null).select('classroom_id');
+      if (claimError || !claimed?.length) {
+        await service.auth.admin.deleteUser(created.data.user.id);
+        throw claimError ?? new Error(`${classroom} 班主任已设置过密码`);
+      }
+      const signedIn = await anon().auth.signInWithPassword({ email, password });
+      if (signedIn.error) throw signedIn.error;
+      return reply({ session: signedIn.data.session });
+    }
     return reply({ error: '未知操作' }, 400);
   } catch (error) {
     const message = error instanceof Error ? error.message : (error as { message?: string })?.message || '操作失败';

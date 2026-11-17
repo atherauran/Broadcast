@@ -1,13 +1,14 @@
 import { Check, Square } from 'lucide-react';
-import { isOnline, type Classroom } from '@/lib/domain';
+import { isOnline, muted, type Classroom } from '@/lib/domain';
 
 export function roomStatus(room: Classroom, known: boolean, now: number): string {
   if (!known) return '状态待确认';
   return isOnline(room, now) ? '在线' : room.device_id ? '离线' : '离线 · 未绑定';
 }
 
-export function ClassPicker({ rooms, known, now, selected, setSelected }: {
-  rooms: Classroom[]; known: boolean; now: number; selected: string[]; setSelected: (update: (old: string[]) => string[]) => void;
+// With broadcasts, classes whose homeroom teacher paused them say so; the server leaves them out.
+export function ClassPicker({ rooms, known, now, selected, setSelected, broadcast = false }: {
+  broadcast?: boolean; rooms: Classroom[]; known: boolean; now: number; selected: string[]; setSelected: (update: (old: string[]) => string[]) => void;
 }) {
   const total = rooms.length;
   const all = selected.length === total;
@@ -22,6 +23,7 @@ export function ClassPicker({ rooms, known, now, selected, setSelected }: {
       return <button key={room.id} className={'class-card ' + (on ? 'selected' : '')} aria-pressed={on} onClick={() => toggle(room.id)}>
         <span className="class-top"><span className="class-number">{room.id}</span><span className="selection-mark">{on && <Check size={15} strokeWidth={3} />}</span></span>
         <span className="class-status"><span className={'tiny-dot ' + (known && isOnline(room, now) ? 'online' : '')} />{roomStatus(room, known, now)}</span>
+        {broadcast && muted(room, now) && !room.own && <span className="class-paused">班主任已暂停广播</span>}
       </button>;
     })}</div>
   </section>;
