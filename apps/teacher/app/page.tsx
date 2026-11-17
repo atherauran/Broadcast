@@ -375,7 +375,8 @@ export default function App() {
   const known = configured && !!session && live && network;
   const ready = configured && !!session && network && validTeacherName(teacherName);
   // The test class, and what was sent only there, exist for the maintainer alone.
-  const shown = (id: string) => maintainer || id !== TEST_CLASSROOM;
+  // Temporarily shown to every teacher while homeroom features are tested.
+  const shown = (id: string) => maintainer || id !== TEST_CLASSROOM || true;
   const visibleRooms = rooms.filter(room => shown(room.id));
   const classIds = visibleRooms.map(room => room.id);
   const adminClassroom = classIds.includes(classroom) ? classroom : '';
