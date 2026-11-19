@@ -243,6 +243,10 @@ export default function App() {
     await rpc('set_screen_hidden', { p_classroom: room.id, p_hidden: hidden });
     setRooms(old => old.map(item => item.id === room.id ? { ...item, screen_hidden: hidden } : item));
   });
+  const hideSchedule = (room: Classroom, hidden: boolean) => run('hide-schedule', async () => {
+    await rpc('set_schedule_hidden', { p_classroom: room.id, p_hidden: hidden });
+    setRooms(old => old.map(item => item.id === room.id ? { ...item, schedule_hidden: hidden } : item));
+  });
   async function sendBroadcast(input: Record<string, unknown>) {
     const classrooms = [...selected].sort();
     const paused = rooms.filter(room => classrooms.includes(room.id) && muted(room, now) && !room.own).map(room => room.id);
@@ -255,7 +259,6 @@ export default function App() {
   }
   const boardContent = () => {
     const b = drafts.board;
-    // Boards are never read aloud; the server still expects the reading fields.
     return { title: b.title.trim(), entries: boardEntries(b.entries), theme: b.theme, flag: b.flag };
   };
   // Saving under the same id replaces the earlier draft or schedule; without publishAt it stays a draft.
@@ -501,7 +504,7 @@ export default function App() {
             setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
           })} />}
       </>}
-      {tab === 'devices' && <Devices rooms={visibleRooms} now={now} ready={ready} busy={busy} onBack={() => setTab('send')}
+      {tab === 'devices' && <Devices rooms={visibleRooms} now={now} ready={ready} busy={busy} onBack={() => setTab('send')} onHideSchedule={hideSchedule}
         onBazaar={(room, enabled) => run('bazaar', async () => {
           await rpc('set_bazaar_enabled', { p_classroom: room.id, p_enabled: enabled });
           setRooms(old => old.map(item => item.id === room.id ? { ...item, bazaar_enabled: enabled } : item));

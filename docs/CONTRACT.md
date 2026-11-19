@@ -16,10 +16,11 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 
 | RPC | Parameters | Returns / access |
 | --- | --- | --- |
-| `classroom_status` | none | `{server_now, classrooms}`, each with `id`, `device_id`, `device_name`, `last_seen_at`, `connected` and `screen_hidden`; admin |
+| `classroom_status` | none | `{server_now, classrooms}`, each with `id`, `device_id`, `device_name`, `last_seen_at`, `connected`, `screen_hidden` and `schedule_hidden`; admin |
 | `bind_device` | `p_device`, `p_classroom`, `p_name` | empty; admin or server |
 | `unbind_device` | `p_classroom` | empty; admin |
 | `set_screen_hidden` | `p_classroom`, `p_hidden` | empty; admin. Sets `classrooms.screen_hidden` (see Hidden desktop) |
+| `set_schedule_hidden` | `p_classroom`, `p_hidden` | empty; admin, with the same permission as `set_screen_hidden`. Sets `classrooms.schedule_hidden` (see Hidden desktop) |
 | `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule, birthdays}`; current device. `display`, `schedule` and `birthdays` are the same as in `display_state` |
 | `pending_broadcasts` | none | `{server_now, items}`; only this device's current class, not started and not expired |
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
@@ -73,7 +74,9 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 ## Hidden desktop
 
-`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. The classroom subscribes to `classrooms` UPDATEs and refreshes at once.
+`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected.
+
+`classrooms.schedule_hidden` (default false) hides only the timetable: `display_state` and `device_heartbeat` return a null `schedule` and everything else is unchanged. The duty note is not part of the timetable and stays. The classroom subscribes to `classrooms` UPDATEs and refreshes at once.
 
 ## Homeroom teachers
 
@@ -81,7 +84,7 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 - `homeroom_for_name(p_name)` (anon and authenticated) returns `{classroom_id, claimed}` or null. The login page uses it to try `homeroom-<class>@broadcast.local` before the shared admin and maintainer accounts; the teacher app uses it to prompt an unclaimed homeroom teacher on the shared account to set a password.
 - The Edge Function action `claim-homeroom` (`classroom_id`, `password`, 6–72 characters, not the caller's shared password) is admin-only. It creates the class's admin account, stores it in `user_id` once (a class cannot be claimed twice) and returns its `session`, which the teacher app adopts without a new sign-in. To reset a claim, delete that Auth user; `user_id` then becomes null.
-- `can_manage(class)`: any admin while the class is unclaimed, then only its homeroom account and the maintainer. `set_screen_hidden`, `set_schedule` and `set_birthdays` require it.
+- `can_manage(class)`: any admin while the class is unclaimed, then only its homeroom account and the maintainer. `set_screen_hidden`, `set_schedule_hidden`, `set_schedule` and `set_birthdays` require it.
 - `set_broadcast_mute(p_classroom, p_from, p_until)` is for the class's homeroom account and the maintainer only. It stores `classrooms.mute_from`/`mute_until` (null `p_from` means now, null `p_until` lifts the pause; the end must be in the future, within 400 days). During the range, `create_broadcast` from anyone else leaves the class out of the deliveries, and refuses a request whose targets are all paused. Display items and files are unaffected.
 - `classroom_status` adds `mute_from`, `mute_until`, `manage`, `own` (homeroom account or maintainer) and `homeroom` (`{teacher_name, claimed, mine}` or null) to each class.
 

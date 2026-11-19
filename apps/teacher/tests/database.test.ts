@@ -445,6 +445,21 @@ describe('long notes, font sizes and hidden desktops', () => {
     await identity(third); const state = await scalar<{ items: Shown[]; schedule: unknown }>('select display_state()');
     expect(state.items.some(item => item.content.text === '隐藏后仍保留')).toBe(true); expect(state.schedule).not.toBeNull();
     await identity(admin, 'admin'); await expect(db.query('select set_screen_hidden($1,true)', ['9-9'])).rejects.toThrow('班级无效');
+  });
+  it('hides only the timetable of a class, keeping everything else on screen', async () => {
+    await clearDisplay(); await show('note', { text: '课表隐藏时仍显示', color: 'blue' });
+    await identity(admin, 'admin');
+    await db.query('select set_schedule($1,$2,$3,$4)', ['8-1', JSON.stringify([['math'], ['math'], ['math'], ['math'], ['math']]), '老师', null]);
+    await db.query('select set_schedule_hidden($1,true)', ['8-1']);
+    expect(await scalar<Array<{ id: string; schedule_hidden: boolean }>>("select classroom_status()->'classrooms'")).toContainEqual(expect.objectContaining({ id: '8-1', schedule_hidden: true }));
+    await identity(third);
+    const hidden = await scalar<{ items: Shown[]; schedule: unknown }>('select display_state()');
+    expect(hidden.schedule).toBeNull(); expect(hidden.items.map(item => item.content.text)).toContain('课表隐藏时仍显示');
+    expect(await scalar<{ schedule: unknown }>('select device_heartbeat(true)')).toMatchObject({ schedule: null });
+    await expect(db.query('select set_schedule_hidden($1,false)', ['8-1'])).rejects.toThrow('管理员');
+    await identity(admin, 'admin'); await db.query('select set_schedule_hidden($1,false)', ['8-1']);
+    await identity(third); expect((await scalar<{ schedule: unknown }>('select display_state()')).schedule).not.toBeNull();
+    await identity(admin, 'admin'); await expect(db.query('select set_schedule_hidden($1,true)', ['9-9'])).rejects.toThrow('班级无效');
     // Leave the original suite's shared fixtures unchanged.
     await db.exec('reset role; delete from schedules'); await clearDisplay();
   });
@@ -650,6 +665,7 @@ describe('homeroom teachers', () => {
     await db.exec(`reset role; update homerooms set user_id = '${homeroom}', claimed_at = now() where classroom_id = '8-3'`);
     await identity(admin, 'admin');
     await expect(db.query("select set_screen_hidden('8-3', false)")).rejects.toThrow('只有 8-3 班主任');
+    await expect(db.query("select set_schedule_hidden('8-3', true)")).rejects.toThrow('只有 8-3 班主任');
     await expect(db.query("select set_schedule('8-3', $1, '王老师')", [week])).rejects.toThrow('只有 8-3 班主任');
     await expect(db.query(`select set_birthdays('8-3', '[]', '王老师')`)).rejects.toThrow('只有 8-3 班主任');
     await db.query("select set_screen_hidden('8-4', true)");

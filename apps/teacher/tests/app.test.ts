@@ -62,22 +62,27 @@ it('signs every type with the teacher\'s own name unless changed', async () => {
   expect(host.querySelector<HTMLInputElement>('[aria-label="署名"]')!.className).toContain('invalid');
 });
 it('hides and restores a classroom desktop with one click', async () => {
-  const onHide = vi.fn().mockResolvedValue(true);
+  const onHide = vi.fn().mockResolvedValue(true); const onHideSchedule = vi.fn().mockResolvedValue(true);
   const room: Classroom = { id: '8-1', device_id: 'pc', device_name: '8-1 电脑', connected: true, last_seen_at: null };
-  const render = (screen_hidden: boolean) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden }], now: 0, ready: true, busy: '',
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide, onBazaar: vi.fn() })));
+  const render = (screen_hidden: boolean, schedule_hidden = false) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden, schedule_hidden }], now: 0, ready: true, busy: '',
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide, onHideSchedule, onBazaar: vi.fn() })));
   await render(false);
   await click('隐藏桌面'); expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), true);
   await render(true);
   expect(host.textContent).toContain('桌面已隐藏');
   await click('恢复桌面'); expect(onHide).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), false);
+  await render(false);
+  await click('隐藏课表'); expect(onHideSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), true);
+  await render(false, true);
+  expect(host.textContent).toContain('课表已隐藏');
+  await click('显示课表'); expect(onHideSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), false);
 });
 it('defaults bazaar display to on and toggles it separately for each class', async () => {
   const onBazaar = vi.fn().mockResolvedValue(true);
   const rooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
   const render = (enabled?: boolean, busy = '') => act(async () => root.render(createElement(Devices, {
     rooms: rooms.map((room, i) => i === 0 ? { ...room, bazaar_enabled: enabled } : room), now: 0, ready: true, busy,
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onBazaar,
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onHideSchedule: vi.fn(), onBazaar,
   })));
   await render();
   const switches = () => [...host.querySelectorAll<HTMLInputElement>('[role="switch"]')];
@@ -343,7 +348,7 @@ it('locks the desktop switch of a class claimed by another homeroom teacher', as
   const room: Classroom = { id: '8-2', device_id: 'pc', device_name: null, connected: true, last_seen_at: null, manage: false,
     homeroom: { teacher_name: 'Mr. Steven', claimed: true, mine: false } };
   await act(async () => root.render(createElement(Devices, { rooms: [room], now: 0, ready: true, busy: '',
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onBazaar: vi.fn() })));
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onHideSchedule: vi.fn(), onBazaar: vi.fn() })));
   expect(host.textContent).toContain('班主任 Mr. Steven');
   expect([...host.querySelectorAll('button')].find(b => b.textContent === '隐藏桌面')!.disabled).toBe(true);
 });

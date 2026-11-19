@@ -28,7 +28,7 @@ export const TEMPLATES: { label: string; text: string }[] = [
 export const BOARD_TEMPLATES = [{ label: '晨会通知', title: '晨会通知', end: '08:30' }];
 export interface Classroom {
   id: string; device_id: string | null; device_name: string | null;
-  last_seen_at: string | null; connected: boolean; screen_hidden?: boolean; bazaar_enabled?: boolean;
+  last_seen_at: string | null; connected: boolean; screen_hidden?: boolean; schedule_hidden?: boolean; bazaar_enabled?: boolean;
   // manage: may clear the screen and edit class data; own: this class's homeroom account (or the maintainer).
   mute_from?: string | null; mute_until?: string | null; manage?: boolean; own?: boolean;
   homeroom?: { teacher_name: string; claimed: boolean; mine: boolean } | null;
