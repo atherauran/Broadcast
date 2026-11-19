@@ -385,7 +385,7 @@ export default function App() {
   // A normal connect takes a moment; only warn once it is clearly slow, so the page does not jump.
   useEffect(() => {
     if (known || !userId) return;
-    const timer = window.setTimeout(() => setSlow(true), 2000);
+    const timer = window.setTimeout(() => setSlow(true), 3000);
     return () => { clearTimeout(timer); setSlow(false); };
   }, [known, userId]);
   const ready = configured && !!session && network && validTeacherName(teacherName);
