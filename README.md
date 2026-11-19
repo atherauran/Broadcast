@@ -1,77 +1,71 @@
 # Campus Classroom Broadcast System
 
-A React + TypeScript PWA for teachers, a C# + Avalonia app for classrooms, and Supabase as the backend. Six fixed classes (8-1 to 8-6), one device per class, plus a Test class for the maintainer's test PC that the teacher app shows only to the maintainer account.
+A broadcast system for a school with six classes (8-1 to 8-6). Teachers send fullscreen announcements, banners, boards, notes and countdowns from a web app; each classroom PC shows them and reads announcements aloud. A seventh `Test` class is for the maintainer's test PC and is visible only to the maintainer account.
 
-The code includes real login, binding, heartbeat, broadcast, speech and receipt APIs. The production Supabase project, admin account, database migrations and cloud functions are configured, and the GitHub Pages workflow for the teacher app is ready. Still to do: enable GitHub Pages in the repository settings, and test on real Windows machines, phones and the classroom network.
+The teacher app is live at <https://atherauran.github.io/Broadcast/>.
 
-## Layout
+## Components
 
 | Directory | Purpose |
 | --- | --- |
-| `apps/teacher` | Vite + React teacher app and PWA |
-| `apps/classroom/Broadcast.Classroom` | Windows desktop app: tray, settings, fullscreen text, audio |
-| `apps/classroom/Broadcast.Core` | Login session, Realtime, FIFO queue, expiry checks, receipt outbox |
-| `supabase` | SQL migrations, Edge Function, auth and broadcast delivery |
-| `scripts` | Local verification, icon generation, Windows packaging |
-| `docs` | Setup, API contract and Windows guide |
-| `artifacts` | Locally generated EXE, ZIP, static site and layout-check images (not committed) |
+| `apps/teacher` | Teacher app: Vite + React + TypeScript PWA |
+| `apps/classroom/Broadcast.Classroom` | Windows classroom app (Avalonia): tray, fullscreen windows, audio |
+| `apps/classroom/Broadcast.Core` | Classroom logic: login, Realtime, delivery queue, receipt outbox |
+| `apps/classroom/Broadcast.Core.Tests`, `Broadcast.Visual.Tests` | Logic tests and headless layout tests |
+| `supabase` | Migrations, the `broadcast-api` Edge Function and database tests |
+| `scripts` | Verification, Windows packaging, icon and asset generation |
+| `docs` | [Setup](docs/SETUP.md), [API contract](docs/CONTRACT.md), [Windows guide](docs/WINDOWS-GUIDE.md) (Chinese) |
 
-## Local development
+Supabase provides auth, Postgres, Realtime and storage. Speech is synthesized on each classroom PC by Tencent Cloud TTS and is never stored.
 
-Requires Node.js 24 and .NET SDK 10; Deno 2 is used for the cloud function checks. The teacher app runs without any cloud configuration.
+## Features
+
+- **Broadcasts**: up to 300 characters, valid for 30 seconds, played in order with five voices, 0–4 repeats and five emotions. Each class reports received, displayed and played receipts, including after an offline period. A fullscreen broadcast during a lesson asks for confirmation.
+- **Banners**: a text strip of up to 80 characters at the top or bottom of the screen.
+- **Screen items**: boards (themes, flag-raising button, scheduled publishing), notes, countdowns and day counts. They are server state, kept in memory on the PC, and can be listed, copied, edited and removed together.
+- **Class affairs**: a weekly timetable, duty roster and student birthdays per class. Photos of a printed timetable or birthday list are read in the browser with PaddleOCR.
+- **Devices**: bind and unbind classroom PCs, hide a class's desktop, and let homeroom teachers pause other teachers' broadcasts to their class.
+- **File transfers**: one file of up to 10 MiB to selected classes, saved to each PC's desktop.
+- **Bazaar statistics**: a live ranking window with an append-only ledger and corrections.
+- **Teacher feedback**: teachers submit requests and bugs in the app, and the maintainer replies there.
+
+## Development
+
+Requires Node.js 24, .NET SDK 10 and Deno 2.
 
 ```bash
 cd apps/teacher
 npm ci
-cp .env.example .env.local
-npm run dev
+cp .env.example .env.local   # fill in the values below
+npm run dev                  # http://127.0.0.1:5173
 ```
 
-Open `http://127.0.0.1:5173`. The teacher app has a white and light-gray interface, with class selection, the input box and the send button on the home page. Sending is disabled when no backend is configured.
+Without a Supabase configuration the teacher app runs but cannot send anything.
+
+Run all checks, or package the Windows app:
 
 ```bash
-# From the project root
-npm --prefix apps/teacher run build
-dotnet run --project apps/classroom/Broadcast.Core.Tests
-dotnet run --project apps/classroom/Broadcast.Visual.Tests -- artifacts/visual-qa
-bash scripts/verify.sh
-bash scripts/publish-windows.sh
+bash scripts/verify.sh            # teacher tests, build and lint; Deno and .NET tests; Windows build
+bash scripts/publish-windows.sh  # artifacts/Broadcast.Classroom-win-x64.zip
 ```
 
-If the SDK is not on PATH, set `DOTNET_BIN=/full/path/dotnet` for the scripts.
-The Windows build is `artifacts/windows-x64/Broadcast.Classroom.exe`, and the distribution package is `artifacts/Broadcast.Classroom-win-x64.zip` (EXE, its native libraries, config and usage guide; keep the files together). The self-contained, ReadyToRun-compiled EXE needs no preinstalled .NET and extracts nothing at launch. A supervisor process restarts the app after any abnormal exit. The publish script packages the untracked `appsettings.local.json` if present, and falls back to the safe template otherwise.
+Set `DOTNET_BIN` if `dotnet` is not on `PATH`. The Postgres rules are tested in PGlite, so no cloud account is needed.
 
-## First-time setup (after cloning)
+### Local configuration
 
-Two local config files are gitignored and must be created after cloning:
+Two gitignored files are needed after cloning:
 
-- `apps/teacher/.env.local`: copy `.env.example` and fill in `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Both are public and match `supabase_url` and `supabase_anon_key` in `apps/classroom/Broadcast.Classroom/appsettings.json`.
-- `apps/classroom/Broadcast.Classroom/appsettings.local.json`: copy `appsettings.json` from the same directory and fill in `tencent_tts.secret_id` and `secret_key`. Get the keys from the project owner or use your own Tencent Cloud account, and never commit them. Without them the classroom app still builds but cannot synthesize speech.
+- `apps/teacher/.env.local`: copy `.env.example` and set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, which match `supabase_url` and `supabase_anon_key` in `apps/classroom/Broadcast.Classroom/appsettings.json`.
+- `apps/classroom/Broadcast.Classroom/appsettings.local.json`: a copy of `appsettings.json` with `tencent_tts.secret_id` and `secret_key` filled in. Without them the classroom app cannot synthesize speech. Never commit it.
 
-Logging in and sending broadcasts also requires the shared admin password from the project owner. By default the app connects to the production Supabase project; for a separate dev environment, follow the [cloud setup guide](docs/SETUP.md).
+Signing in requires the shared admin password. For a separate backend, follow the [setup guide](docs/SETUP.md).
 
-## Features
+## Deployment
 
-Details of every API and rule are in the [API contract](docs/CONTRACT.md); classroom-side behavior is in the [Windows guide](docs/WINDOWS-GUIDE.md).
-
-- **Login**: teachers sign in with their name and the shared admin password; the name is saved in the browser and shown on everything they send. Homeroom teachers can claim their class with a personal password.
-- **Binding**: a classroom PC binds to one class once (admin verified) and then logs in with its own device identity. Heartbeat every 120 seconds; offline after 270 seconds without one.
-- **Broadcasts**: up to 300 characters, valid for 30 seconds from creation, played in FIFO order. Speech is synthesized on the classroom PC by Tencent Cloud (five voices, 0–4 repeats, five emotions) and never stored. Receipts (received, displayed, playing, played) are kept per class and survive offline periods. Fullscreen broadcasts during lessons ask for confirmation.
-- **Banners**: text-only strip (up to 80 characters) at the top or bottom, on its own lane.
-- **Screen items**: boards (themes, flag-raising button, drafts and scheduled publishing), notes, countdowns and day counts are server state shown in desktop windows and kept in memory only. The 正在显示 tab lists, removes, copies and edits them.
-- **Class affairs (班务)**: weekly timetable, duty roster and student birthdays per class, with photo recognition (PaddleOCR running in the browser; the photo never leaves the device).
-- **Devices (教室设备)**: bind status, unbind, hide a class's desktop, bazaar switch, and homeroom broadcast pauses.
-- **File transfers**: one file up to 10 MiB to selected classes, saved to each PC's desktop; stored for 24 hours.
-- **Bazaar statistics**: a realtime fundraising ranking window per class with an append-only ledger and corrections.
-
-## Configuration and verification
-
-See the [cloud setup guide](docs/SETUP.md), the [API contract](docs/CONTRACT.md) and the [Windows guide](docs/WINDOWS-GUIDE.md).
-
-Automated tests use no real cloud accounts: Postgres rules run in the PGlite engine, the queue uses controllable speech and display fakes, and Avalonia layout is checked with headless rendering. Real cloud integration and Windows hardware and audio tests must be done after configuration.
-
-`.github/workflows/pages.yml` tests, builds and publishes the teacher app on each `main` update. Before the first publish, set GitHub Actions as the source in the repository's Pages settings.
+- **Teacher app**: `.github/workflows/pages.yml` tests, builds and publishes it to GitHub Pages on every push to `main`.
+- **Backend**: `supabase db push` and `supabase functions deploy broadcast-api`; see the [setup guide](docs/SETUP.md).
+- **Classroom app**: `scripts/publish-windows.sh` builds a self-contained Windows x64 package. It uses `appsettings.local.json` as the package's `appsettings.json` if present, so the package contains the Tencent Cloud keys.
 
 ## License
 
-The code is released under the [MIT License](LICENSE). Bundled third-party assets keep their own terms: the national anthem recording (from gov.cn) and the PaddleOCR models and runtime in `apps/teacher/public/ocr` are not covered by this license.
+[MIT](LICENSE). The bundled national anthem recording (from gov.cn) and the PaddleOCR models and runtime in `apps/teacher/public/ocr` keep their own terms and are not covered by it.

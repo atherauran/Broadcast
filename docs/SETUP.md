@@ -1,41 +1,54 @@
-# Cloud Setup and Deployment
+# Setup and Deployment
 
-The production Supabase project `kmuuixuiipqxzeyoawap` already has its database, admin account, cloud function and local origins configured. Migration `202609080001_broadcast.sql` is registered as applied so the CLI won't rerun it. The steps below are kept for reproducing and maintaining the setup.
+How to set up the backend, teacher app and classroom app for a new environment, or maintain the existing one.
 
 ## Supabase
 
-1. Create a Supabase project and note the project URL and publishable/anon key. Clients use only the public key; never put the service_role key in them. The current URL is `https://kmuuixuiipqxzeyoawap.supabase.co`.
-2. Link the project with the Supabase CLI and apply every SQL file in `supabase/migrations` in filename order.
-3. Keep Auth self-signup disabled. Create one email/password user such as `admin@broadcast.local`, confirm the email, and set `app_metadata.role` to `admin` through the trusted Admin API. Use **app_metadata**, never the user-writable user_metadata. The admin email in the teacher and classroom apps must match. The maintainer who handles teacher feedback has a second user, `maintainer@broadcast.local` (or `VITE_MAINTAINER_EMAIL`), with its own password and `app_metadata` set to `{"role": "admin", "maintainer": true}`; signing in with that password on the same login form changes feedback statuses and marks comments as the maintainer's. Homeroom teachers are rows in `public.homerooms` (class, name, other names); each creates their own `homeroom-<class>@broadcast.local` account from the teacher app (see the contract's Homeroom teachers section).
-4. Deploy the `broadcast-api` Edge Function. `supabase/config.toml` sets `verify_jwt=false` for it, but the function calls `auth.getUser(token)` on every request and checks admin or device permissions, so do not remove that check.
-5. The only function secret needed is `ALLOWED_ORIGINS`. The teacher app's five preview audio clips ship with the static site, so Supabase holds no Tencent Cloud credentials.
-6. `ALLOWED_ORIGINS` is a comma-separated list of full teacher-app origins, including protocol and port. Locally use `http://127.0.0.1:5173,http://localhost:5173`. For GitHub Pages use `https://willyblah.github.io`; the `/Broadcast/` path is not part of the origin.
+1. Create a project and note its URL and publishable (anon) key. Clients use only the public key; never put the `service_role` key in them.
+2. Link the Supabase CLI and apply the migrations:
 
-Example CLI:
+   ```bash
+   supabase login
+   supabase link --project-ref YOUR_PROJECT_REF
+   supabase db push
+   ```
 
-```bash
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-supabase db push
-supabase secrets set --env-file supabase/.env
-supabase functions deploy broadcast-api
-```
+3. Disable Auth self-signup. Create these users, confirm their emails, and set `app_metadata` through the Admin API (never the user-writable `user_metadata`):
+   - the shared admin, `admin@broadcast.local`: `{"role": "admin"}`. Both apps must use the same email.
+   - the maintainer, `maintainer@broadcast.local` (or `VITE_MAINTAINER_EMAIL`), with its own password: `{"role": "admin", "maintainer": true}`. Signing in with it changes feedback statuses and marks comments as the maintainer's.
+   - homeroom teachers are rows in `public.homerooms` (class, name, other names). Each creates their own `homeroom-<class>@broadcast.local` account from the teacher app; see [Homeroom teachers](CONTRACT.md#homeroom-teachers).
+4. Set the function secret and deploy the Edge Function:
 
-Device registration runs in the Edge Function after admin verification, using the Auth Admin API to create a separate device user. The device's public key grants project access only, not admin rights. Devices use Realtime **Postgres Changes** with table-level RLS; arbitrary client Broadcast messages are never used as commands. Keep the default Realtime channel access settings; the publication and SELECT policies come from the migrations.
+   ```bash
+   supabase secrets set --env-file supabase/.env
+   supabase functions deploy broadcast-api
+   ```
+
+   `ALLOWED_ORIGINS` is the only secret. It is a comma-separated list of teacher-app origins (protocol and port, no path): `http://127.0.0.1:5173,http://localhost:5173` locally, plus `https://atherauran.github.io` for GitHub Pages.
+
+`verify_jwt` is disabled for `broadcast-api` in `supabase/config.toml`, but the function checks the caller with `auth.getUser(token)` on every request; do not remove that check.
+
+Devices use Realtime **Postgres Changes** with row-level security. Keep the default Realtime channel settings; the publication and SELECT policies come from the migrations.
+
+### File transfers
+
+The migrations create the private `classroom-files` bucket, enable `pg_cron` and `pg_net`, store a cleanup token in Vault and schedule a cleanup every 15 minutes. For a different project, change the function URL in `20261110091908_file_transfer_cleanup.sql` before applying it. If cleanup fails, check the `cleanup-classroom-files` cron job and its HTTP response.
+
+### Bazaar statistics
+
+Needs no extra secrets or deployment. There is no reset or purge, so use the Test class for trials and keep production ledgers free of test entries.
 
 ## Tencent Cloud
 
-Enable basic speech synthesis and confirm the account can call `TextToVoice`. The teacher app offers five Chinese voices: 智瑜 `101001`, 智云 `101004`, 智燕 `101011`, 智辉 `101013` and 智甜 `101016`.
+Enable basic speech synthesis (`TextToVoice`). The teacher app offers five voices: 智瑜 `101001`, 智云 `101004`, 智燕 `101011`, 智辉 `101013` and 智甜 `101016`.
 
-Synthesis uses `tts.tencentcloudapi.com`, API version `2019-08-23`, normal speed and 16 kHz WAV. Text over the per-call limit is split into chunks of at most 150 characters, and the PCM data is joined by parsing the RIFF chunks. The client prepends one second of silence so Bluetooth, HDMI or USB audio devices can wake up before speech starts. The whole synthesis has a 10-second limit; on failure the broadcast falls back to text only.
+Each classroom PC reads the credentials from `appsettings.json` and calls `tts.tencentcloudapi.com` directly. Audio is generated and played in memory and never uploaded. Text longer than the per-call limit is split into chunks of at most 150 characters, and the client prepends one second of silence so Bluetooth, HDMI and USB audio can wake up. Synthesis has a 10-second limit; on failure the broadcast shows text only.
 
-Preview clips are in `apps/teacher/public/voice-previews`. To regenerate them, configure `apps/classroom/Broadcast.Classroom/appsettings.local.json` locally, then run `node scripts/generate-voice-previews.mjs`. The script synthesizes only the fixed text "请Badger去吃饭".
-
-Each classroom PC reads Tencent Cloud credentials and speech settings from `appsettings.json` next to the program, and calls Tencent Cloud directly after receiving a broadcast. The voice is chosen per broadcast, not in the classroom config. Audio is generated and played in client memory only and is never uploaded to Supabase.
+The teacher app's voice previews are static WAV files in `apps/teacher/public/voice-previews`. To regenerate them, set up `appsettings.local.json` and run `node scripts/generate-voice-previews.mjs`.
 
 ## Teacher app
 
-Fill in `apps/teacher/.env.local`:
+Set `apps/teacher/.env.local`:
 
 ```dotenv
 VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
@@ -43,15 +56,13 @@ VITE_SUPABASE_ANON_KEY=YOUR_PUBLIC_KEY
 VITE_ADMIN_EMAIL=admin@broadcast.local
 ```
 
-Restart the dev server. For a production build, run `npm --prefix apps/teacher run build`; the output in `apps/teacher/dist` can go on any static web server. Environment variables are baked in at build time, so rebuild after changing them.
+Variables are baked in at build time, so rebuild after changing them. `npm --prefix apps/teacher run build` writes a static site to `apps/teacher/dist`.
 
-Installing the PWA on a phone requires HTTPS; a phone cannot reach a Mac's localhost.
+`.github/workflows/pages.yml` publishes it to GitHub Pages on every push to `main`, with `/Broadcast/` as the base path. The workflow carries the public project URL and key; never put the service role or Tencent Cloud keys there. Installing the PWA on a phone requires HTTPS.
 
-`.github/workflows/pages.yml` builds and deploys the teacher app on each push to `main`, using `/Broadcast/` as the base path for Vite, the manifest and the Service Worker. Before first use, select **GitHub Actions** as the source in the repository's Pages settings. The project URL and publishable key are public browser config and are already in the workflow; never put the service role or Tencent Cloud keys in it.
+## Classroom app
 
-## Windows client
-
-Fill in the distribution package's `appsettings.json`:
+Run `scripts/publish-windows.sh` to build the package, or edit `appsettings.json` in an existing one. No rebuild is needed for config changes.
 
 ```json
 {
@@ -70,14 +81,4 @@ Fill in the distribution package's `appsettings.json`:
 }
 ```
 
-No EXE rebuild is needed. The file contains Tencent Cloud keys, so restrict read access to the program directory. The repository's `appsettings.json` is a safe template without keys; for local publishing, keep the full config in the ignored `appsettings.local.json`, which `scripts/publish-windows.sh` uses as the package's `appsettings.json`. After launch, pick a class; an admin can unbind a dead PC from the teacher app's device management.
-
-For the first integration test, use at least one Windows x64 PC and complete receive, display, playback and history receipts with real Tencent Cloud audio.
-
-## File transfers
-
-The file-transfer migrations create the private `classroom-files` bucket (10 MiB per object), enable `pg_cron` and `pg_net`, generate a cleanup token in Supabase Vault and schedule Storage cleanup every 15 minutes. For a different project, change the function URL in the cleanup migration before applying it. When diagnosing cleanup errors, check the `cleanup-classroom-files` Cron job and its HTTP response.
-
-## Bazaar statistics
-
-No extra secrets, bucket or function deployment is needed. Use the Test classroom for a first integration test, and keep production ledgers free of test entries: there is no automatic reset or purge.
+The file holds Tencent Cloud keys, so restrict read access to the program directory. The repository's `appsettings.json` is a template without keys; keep the real one in the ignored `appsettings.local.json`, which the publish script uses. See the [Windows guide](WINDOWS-GUIDE.md) for installing and operating a classroom PC.
