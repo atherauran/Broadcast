@@ -262,9 +262,10 @@ h1,h2,p { margin: 0; } h1 { font-size: 20px; letter-spacing: -.6px; font-weight:
 .file-saved-name { overflow-wrap: anywhere; }
 @media (max-width: 600px) { .file-send-row { align-items: stretch; flex-direction: column; } }
 .homeroom-panel h2 { margin-bottom: 8px; font-size: 16px; }
-.homeroom-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 10px; }
-.homeroom-control { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 8px 8px 14px; border: 1px solid #e3e8f0; border-radius: 12px; background: #fff; }
-.homeroom-control strong { font-size: 14px; } .homeroom-control p { margin-top: 2px; font-size: 13px; } .homeroom-control .action { height: 36px; padding: 0 12px; font-size: 14px; flex: none; }
+.homeroom-controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 600px) { .homeroom-controls { grid-template-columns: minmax(0, 1fr); } }
+.homeroom-control { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 8px 6px 8px 12px; border: 1px solid #e3e8f0; border-radius: 12px; background: #fff; }
+.homeroom-control strong { font-size: 14px; } .homeroom-control p { margin-top: 2px; font-size: 13px; } .homeroom-control .action { height: 34px; padding: 0 8px; font-size: 13px; flex: none; }
 .homeroom-control .paused, .class-paused { color: #8c5c08; }
 .class-paused { display: block; margin-top: 4px; font-size: 13px; }
 .mute-card .option-field { margin-top: 16px; } .mute-card .feedback, .claim-form .feedback { margin: 12px 0 0; }
