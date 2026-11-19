@@ -150,12 +150,12 @@ describe('banner style', () => {
   });
 });
 describe('display items', () => {
-  const board = { title: '', entries: ['  明天穿校服 ', '', '下午大扫除'], speak: true, voice_type: 101004 };
+  const board = { title: '', entries: ['  明天穿校服 ', '', '下午大扫除'] };
   it('shows a class only its own items, normalized, through the heartbeat', async () => {
     await clearDisplay(); const id = await show('board', board, ['8-1', '8-3']); await show('note', { text: '8-2 的便签', color: 'pink' }, ['8-2']);
     const items = await screen();
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ kind: 'board', content: { title: '公告', entries: ['明天穿校服', '下午大扫除'], speak: true, voice_type: 101004 } });
+    expect(items[0]).toMatchObject({ kind: 'board', content: { title: '公告', entries: ['明天穿校服', '下午大扫除'] } });
     expect(await scalar<number>('select count(*)::int from display_items')).toBe(1);
     await identity(admin, 'admin'); expect(await scalar<number>('select count(*)::int from display_items where request_id=$1', [id])).toBe(2);
   });
@@ -165,11 +165,11 @@ describe('display items', () => {
     const items = await screen(); expect(items).toHaveLength(1); expect(Date.parse(items[0].starts_at)).toBeGreaterThanOrEqual(before - 1000);
     const state = await scalar<{ items: Shown[] }>('select display_state()'); expect(state.items).toHaveLength(1);
   });
-  it('drops removed and ended items, and removes one class or all of a request', async () => {
+  it('drops removed and ended items, and removes items by id', async () => {
     await clearDisplay(); const id = await show('note', { text: '移除测试', color: 'blue' }, ['8-1', '8-2']);
-    await db.query('select remove_display_item($1)', [await rowId(id)]);
+    await db.query('select remove_display_items($1)', [[await rowId(id)]]);
     expect(await screen()).toHaveLength(0); expect(await screen(second)).toHaveLength(1);
-    await db.query('select remove_display_item($1, true)', [await rowId(id, '8-2')]); expect(await screen(second)).toHaveLength(0);
+    await db.query('select remove_display_items($1)', [[await rowId(id, '8-2')]]); expect(await screen(second)).toHaveLength(0);
     const ended = await show('note', { text: '已结束', color: 'blue' }); await db.exec('reset role');
     await db.query("update display_items set starts_at=clock_timestamp()-interval '2 minutes', ends_at=clock_timestamp()-interval '1 second' where request_id=$1", [ended]);
     expect(await screen()).toHaveLength(0);
@@ -230,8 +230,8 @@ describe('display items', () => {
     await expect(show('countdown', { label: '全屏', fullscreen: 'yes' }, ['8-1'], { duration: 600 })).rejects.toThrow('显示方式');
   });
   it('validates content and times', async () => {
-    await expect(show('board', { entries: [], speak: false, voice_type: 101001 })).rejects.toThrow('1–12');
-    await expect(show('board', { entries: ['字'.repeat(301)], speak: false, voice_type: 101001 })).rejects.toThrow('300');
+    await expect(show('board', { entries: [] })).rejects.toThrow('1–12');
+    await expect(show('board', { entries: ['字'.repeat(301)] })).rejects.toThrow('300');
     await expect(show('note', { text: '颜色', color: 'red' })).rejects.toThrow('颜色');
     await expect(show('note', { text: '过去', color: 'red' }, ['8-1'], { end: new Date(Date.now() - 1000).toISOString() })).rejects.toThrow();
     await show('note', { text: '一年', color: 'yellow' }, ['8-2'], { end: new Date(Date.now() + 365 * 86_400_000).toISOString() });
@@ -247,7 +247,7 @@ describe('display items', () => {
   it('lets only admins write, and never directly', async () => {
     await identity(third);
     await expect(db.query('select create_display_item($1,$2,$3,$4,$5,null,600)', [crypto.randomUUID(), 'countdown', ['8-1'], '{}', '伪造者'])).rejects.toThrow('管理员');
-    await expect(db.query('select remove_display_item($1)', [crypto.randomUUID()])).rejects.toThrow('管理员');
+    await expect(db.query('select remove_display_items($1)', [[crypto.randomUUID()]])).rejects.toThrow('管理员');
     await expect(db.query('select display_overview()')).rejects.toThrow('管理员');
     await expect(db.query("update display_items set removed_at=clock_timestamp()")).rejects.toThrow('permission denied');
     await expect(db.query('select device_display_items()')).rejects.toThrow('permission denied');
@@ -259,7 +259,7 @@ describe('display items', () => {
   });
 });
 describe('board drafts, scheduled boards and edits', () => {
-  const board = { title: '晨会通知', entries: ['升旗仪式'], speak: false, voice_type: 101001 };
+  const board = { title: '晨会通知', entries: ['升旗仪式'] };
   const later = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
   const save = (id: string, extra: { classes?: string[]; end?: string | null; publish?: string | null; content?: object } = {}) =>
     db.query('select save_board_draft($1,$2,$3,$4,$5::timestamptz,$6::timestamptz)',
@@ -321,16 +321,16 @@ describe('board drafts, scheduled boards and edits', () => {
 });
 describe('board themes and schedules', () => {
   it('defaults a board to the plain theme and validates the choice', async () => {
-    await clearDisplay(); await show('board', { entries: ['节日快乐'], speak: false, voice_type: 101001, theme: 'festive' });
-    await show('board', { entries: ['旧页面'], speak: false, voice_type: 101001 });
+    await clearDisplay(); await show('board', { entries: ['节日快乐'], theme: 'festive' });
+    await show('board', { entries: ['旧页面'] });
     expect((await screen()).map(i => String(i.content.theme)).toSorted((a, b) => a.localeCompare(b))).toEqual(['festive', 'plain']);
-    await expect(show('board', { entries: ['x'], speak: false, voice_type: 101001, theme: 'neon' })).rejects.toThrow('背景');
+    await expect(show('board', { entries: ['x'], theme: 'neon' })).rejects.toThrow('背景');
   });
   it('keeps the flag-raising choice and defaults it to off', async () => {
-    await clearDisplay(); await show('board', { title: '晨会', entries: ['升旗'], speak: false, voice_type: 101001, flag: true });
-    await show('board', { entries: ['旧页面'], speak: false, voice_type: 101001 });
+    await clearDisplay(); await show('board', { title: '晨会', entries: ['升旗'], flag: true });
+    await show('board', { entries: ['旧页面'] });
     expect((await screen()).map(i => String(i.content.flag)).toSorted((a, b) => a.localeCompare(b))).toEqual(['false', 'true']);
-    await expect(show('board', { entries: ['x'], speak: false, voice_type: 101001, flag: 'yes' })).rejects.toThrow('升旗');
+    await expect(show('board', { entries: ['x'], flag: 'yes' })).rejects.toThrow('升旗');
   });
   const week = [['english', 'math', 'lunch', 'pe'], ['chinese'], [], ['club', 'it'], ['art', 'elective']];
   const save = (classroom: string, days: unknown) => db.query('select set_schedule($1,$2,$3)', [classroom, JSON.stringify(days), '赵老师']);

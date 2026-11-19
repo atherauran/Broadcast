@@ -10,7 +10,6 @@ internal static class LocalState
     private static readonly object LogLock = new();
     public static string Folder { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "BroadcastClassroom");
     private static string CredentialPath => Path.Combine(Folder, "device.credential");
-    private static string LegacySessionPath => Path.Combine(Folder, "device.session");
     public static ServiceConfig Config()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "appsettings.json");
@@ -19,7 +18,6 @@ internal static class LocalState
         return File.Exists(path) ? JsonSerializer.Deserialize<ServiceConfig>(File.ReadAllText(path), Json.Options)! : new();
     }
 
-    public static bool HasLegacySession => File.Exists(LegacySessionPath);
     public static DeviceCredential? LoadDevice()
     {
         if (!File.Exists(CredentialPath) || !OperatingSystem.IsWindows()) return null;
@@ -33,10 +31,9 @@ internal static class LocalState
         var bytes = ProtectedData.Protect(JsonSerializer.SerializeToUtf8Bytes(device, Json.Options), null, DataProtectionScope.CurrentUser);
         File.WriteAllBytes(CredentialPath + ".tmp", bytes);
         File.Move(CredentialPath + ".tmp", CredentialPath, true);
-        File.Delete(LegacySessionPath);
     }
 
-    public static void ForgetDevice() { File.Delete(CredentialPath); File.Delete(LegacySessionPath); }
+    public static void ForgetDevice() { File.Delete(CredentialPath); }
     public static void EnableAutoStart()
     {
         if (!OperatingSystem.IsWindows()) return;

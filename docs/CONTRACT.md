@@ -27,7 +27,6 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `broadcast_history` | nullable `p_before`, nullable `p_id` | up to 20 broadcasts with nested `deliveries`; admin |
 | `create_display_item` | `p_request`, `p_kind`, `p_classrooms`, `p_content`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_duration_seconds`, nullable `p_starts_at` | the request ID; admin, idempotent per request |
 | `copy_display_items` | `p_request`, `p_ids`, `p_classrooms`, `p_teacher_name` | empty; admin. Creates each given live item's request again (one per request, same kind, content, start and end) for the given classes; each copy's request ID is `md5(p_request ‖ source request)`, so a retry is idempotent |
-| `remove_display_item` | `p_id`, `p_all` (default false) | empty; admin. `p_all` removes the item from every class of the same request |
 | `remove_display_items` | `p_ids` | empty; admin. Removes the given items in one request |
 | `update_display_items` | `p_ids`, `p_content`, `p_ends_at` | empty; admin. Replaces the content and end of live items of one kind |
 | `save_board_draft` | `p_id`, `p_content`, `p_classrooms`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_publish_at` | empty; admin. Saves a board draft, or schedules it when `p_publish_at` is set (see Board drafts) |
@@ -50,8 +49,8 @@ Receipt events are `received`, `displayed`, `playing`, `played`, `audio_failed`,
 `display_items` holds one row per class for each board, note or countdown: `request_id`, `classroom_id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, `created_by`, `created_at` and nullable `removed_at`. Devices may select only their current class's rows (removed rows included, so Realtime delivers removals). Every write goes through the admin RPCs above.
 
 `content` by kind:
-- board: `{title, entries, speak, voice_type, theme, flag}`, with title at most 30 characters (default 公告), 1–12 entries of at most 300 characters each, theme `plain` (default), `festive`, `joyful`, `fresh`, `tech` or `safety`, and optional boolean `flag` (default false). All boards share one window, which uses the newest board's theme and shows the flag-raising button when any of them has `flag`. The teacher app always sends `speak: false`, so boards are not read aloud.
-- note: `{text, color, font_size}`, with text 1–300 characters, color `yellow`, `blue`, `green` or `pink`, and optional integer `font_size` 18–28 (stored as 20 when omitted; the teacher app offers 18, 20, 24 and 28). Older classroom apps ignore `font_size` and draw notes at 20.
+- board: `{title, entries, theme, flag}`, with title at most 30 characters (default 公告), 1–12 entries of at most 300 characters each, theme `plain` (default), `festive`, `joyful`, `fresh`, `tech` or `safety`, and optional boolean `flag` (default false). All boards share one window, which uses the newest board's theme and shows the flag-raising button when any of them has `flag`.
+- note: `{text, color, font_size}`, with text 1–300 characters, color `yellow`, `blue`, `green` or `pink`, and optional integer `font_size` 18–28 (stored as 20 when omitted; the teacher app offers 18, 20, 24 and 28).
 - countdown: `{label, fullscreen}`, label at most 20 characters; `fullscreen` is optional and defaults to false. A day count adds `date` (`YYYY-MM-DD`, `fullscreen` must be false): the device shows the calendar days left on its local date, "今天" on the day itself.
 
 Every item starts when it is created (`starts_at` is the server time), unless `p_starts_at` sets a later start (not for countdowns) or it is a scheduled board; the end must fall in the future and within 400 days. A countdown takes either `p_duration_seconds` (60–43200, counted on the server clock) or `p_ends_at`, and replaces any live countdown of the same type in its classes. A day count (`content.date`) must be sent with `p_ends_at` (the end of that date) up to 400 days ahead, is not subject to the 12-hour limit, and never replaces anything: up to 3 day counts can be live per class (a fourth is refused), and a timed countdown replaces only another timed one. The device shows the day counts (soonest first) at the top right, above the timetable, in a desktop window that other windows can cover. Beside that column sit the newest timed countdown in its own topmost window and, below it, the notes (oldest first) in a desktop window that other windows can cover, starting a new column to the left when the screen height runs out. A note is refused when 12 notes of a target class would overlap its time on screen. Device queries keep a countdown for 5 seconds past `ends_at`.
@@ -74,7 +73,7 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 ## Hidden desktop
 
-`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. Classroom apps that predate it pick the change up on their next periodic `display_state` check (at most about 40 seconds); newer ones also subscribe to `classrooms` UPDATEs and refresh at once.
+`classrooms.screen_hidden` (default false) clears a class's desktop without touching its data: while it is set, `display_state` and `device_heartbeat` return no items (the duty note included) and null `schedule` and `birthdays`; clearing it brings everything back as it was. Fullscreen alerts and banners are unaffected. The classroom subscribes to `classrooms` UPDATEs and refreshes at once.
 
 ## Homeroom teachers
 
@@ -86,7 +85,7 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 - `set_broadcast_mute(p_classroom, p_from, p_until)` is for the class's homeroom account and the maintainer only. It stores `classrooms.mute_from`/`mute_until` (null `p_from` means now, null `p_until` lifts the pause; the end must be in the future, within 400 days). During the range, `create_broadcast` from anyone else leaves the class out of the deliveries, and refuses a request whose targets are all paused. Display items and files are unaffected.
 - `classroom_status` adds `mute_from`, `mute_until`, `manage`, `own` (homeroom account or maintainer) and `homeroom` (`{teacher_name, claimed, mine}` or null) to each class.
 
-`create_broadcast`, `set_schedule` and `set_birthdays` wrap the former functions, renamed `*_unchecked` and no longer callable by clients. The classroom app needs no update.
+`create_broadcast`, `set_schedule` and `set_birthdays` wrap internal `*_unchecked` functions that clients cannot call.
 
 ## Teacher names
 
@@ -101,10 +100,6 @@ After the subscription succeeds, the classroom starts reporting heartbeats: ever
 `start_delivery` is the persistent gate against duplicate playback. If the gate was written but the app crashed before displaying, the message is not replayed; history keeps the start record and waits for a completion receipt, and one missing for over 5 minutes shows "结果待确认" (result unconfirmed). This is a deliberate trade-off between never replaying and surviving crashes, and an unknown outcome is never disguised as played.
 
 Receipts and online status are shown separately. The 30-second validity limits only when playback may start; it never interrupts a broadcast already playing. Reconnecting can only recover deliveries and submit receipts, and never replays a message that has started.
-
-## Rollout order
-
-Apply the migrations, deploy the Edge Function, publish the teacher app, then update the classroom app. `create_broadcast` gained two parameters, so the migration and Edge Function must ship together. Classroom apps from before this change ignore `style` and show banners as fullscreen broadcasts, and they never show display items. The schedules migration must be applied before the new classroom app ships, because its Realtime join includes the `schedules` table; older classroom apps ignore schedules, board themes, the flag button and birthdays. The birthdays migration must likewise be applied before the new classroom app ships, because its Realtime join includes the `birthdays` table.
 
 ## File transfers
 
@@ -123,7 +118,6 @@ Device RPCs:
 
 Storage INSERT is restricted to an admin's own unpublished reservation, less than one hour old. There is no client UPDATE or DELETE policy. Storage SELECT requires an active, unfinished transfer assigned to the authenticated device's current classroom. Neither public objects nor signed public download links are used.
 
-`202611120002_file_limit_10mb.sql` caps new reservations, new sends and the Storage bucket at 10 MiB (10,485,760 bytes). Previously sent files and their history remain valid under the former 20 MiB limit; the classroom receiver retains that download ceiling for compatibility. The shared 200 MiB storage cap is unchanged.
 
 The classroom subscribes to `file_deliveries` INSERTs on its existing Realtime connection and rechecks on reconnect/every 40 seconds. Downloads run separately from announcements. The file streams to a temporary desktop file (maximum declared size, five-minute timeout), is length-checked, and moves to the final desktop filename without overwriting. Existing names gain `(1)`, `(2)`, etc. A local per-delivery destination/completion marker and the existing durable receipt outbox prevent duplicate copies after a lost receipt or process restart. The client never opens a received file. A download failure is terminal and shown to the teacher; sending the file again creates a new transfer.
 
@@ -144,6 +138,4 @@ Totals and rankings use only entries with no successor; the cumulative curve gro
 
 The classroom subscribes to `bazaar_entries` INSERTs on its existing Realtime socket, without a filter (RLS restricts the class), and re-fetches on changes, classroom UPDATEs, reconnect and the 40-second recovery check. Income synchronization runs separately from broadcasts and file downloads. The input window retains a request's ID and values after an uncertain network result and offers retry. No offline income queue is stored on disk: successful saves require a server response. Statistics windows are normal desktop windows, never topmost; a local close is reversible via the tray menu.
 
-Apply `202611120001_bazaar.sql` before updating either client, since the new classroom Realtime subscription requires the table to exist. No Edge Function changes are needed for this feature.
 
-`202611120003_bazaar_token_steps.sql` enforces multiples of 5 for new income and corrections. Existing ledger entries remain unchanged. The classroom input starts at 5, steps by 5 and validates typed values before saving.

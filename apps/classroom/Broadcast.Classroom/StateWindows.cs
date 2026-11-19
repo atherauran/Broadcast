@@ -378,7 +378,7 @@ internal sealed class NotesWindow : StateWindow
         if (birthdays.Count > 0) _cards.Children.Add(BirthdayArt.Card(birthdays, today));
         foreach (var note in notes)
         {
-            if (IsDuty(note)) { _cards.Children.Add(DutyCard(note)); continue; }
+            if (note.Content.Duty) { _cards.Children.Add(DutyCard(note)); continue; }
             var author = Text("— " + note.TeacherName, 14, "#4B5563");
             author.HorizontalAlignment = HorizontalAlignment.Right; author.Margin = new Thickness(0, 4, 0, 0);
             _cards.Children.Add(new Border
@@ -394,7 +394,6 @@ internal sealed class NotesWindow : StateWindow
         Relayout();
     }
 
-    internal static bool IsDuty(DisplayItem item) => item.Content.Duty || (item.TeacherName == "今日值日" && item.StartsAt.UtcDateTime == new DateTime(2000, 1, 1));
 
     private static Border DutyCard(DisplayItem item) => new()
     {

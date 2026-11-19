@@ -4,10 +4,9 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, FileUp, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { registerBroadcastTools } from '@/lib/webmcp';
 import { adminEmail, claimHomeroom, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getOverview, getSchedules, homeroomEmail, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
 import type { FileTransfer } from '@/lib/files';
-import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, isOnline, localInput, muted, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, localInput, muted, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
   type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Timetable } from '@/lib/domain';
 import { Login } from './login';
@@ -257,7 +256,7 @@ export default function App() {
   const boardContent = () => {
     const b = drafts.board;
     // Boards are never read aloud; the server still expects the reading fields.
-    return { title: b.title.trim(), entries: boardEntries(b.entries), speak: false, voice_type: 101001, theme: b.theme, flag: b.flag };
+    return { title: b.title.trim(), entries: boardEntries(b.entries), theme: b.theme, flag: b.flag };
   };
   // Saving under the same id replaces the earlier draft or schedule; without publishAt it stays a draft.
   async function saveBoard(publishAt: string) {
@@ -389,10 +388,6 @@ export default function App() {
   const classLocked = classRoom?.manage === false;
   const homeroomAccount = !!session?.user.email?.startsWith('homeroom-');
   const showClaim = homeroom && !homeroomAccount && !maintainer && (!homeroom.claimed || !claimSeen);
-  useEffect(() => registerBroadcastTools(
-    () => ({ connected: known, classrooms: rooms.map(room => ({ id: room.id, online: known ? isOnline(room, serverNow()) : null })) }),
-    (text, targets) => { patch('alert', { body: text, sourceId: null }); setSelected(targets); setKind('alert'); setTab('send'); },
-  ), [known, rooms, patch]);
 
   if (configured && !authReady) return <main className="login-shell"><p>正在恢复登录…</p></main>;
   if (configured && !session) return <Login name={loginName} setName={setLoginName} password={password} setPassword={setPassword}

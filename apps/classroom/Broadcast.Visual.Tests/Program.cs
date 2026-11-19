@@ -83,7 +83,7 @@ foreach (var (name, count, entries, width, height) in new[]
 })
 {
     var board = new BoardWindow { Width = width, Height = height };
-    board.Present(Enumerable.Range(1, count).Select(i => Item("board", new DisplayContent($"今日公告{i}", entries, true))).ToArray(), []); board.Show(); Dispatcher.UIThread.RunJobs();
+    board.Present(Enumerable.Range(1, count).Select(i => Item("board", new DisplayContent($"今日公告{i}", entries))).ToArray(), []); board.Show(); Dispatcher.UIThread.RunJobs();
     if (board.Topmost || !board.ShowInTaskbar || board.Title != "公告") throw new Exception(name + ": board must be a normal window");
     // Only content too long for the window at the smallest size may scroll.
     if (board.Boards.Bounds.Height > board.ClientSize.Height - 80 + 1 && board.BaseSize > 14.5) throw new Exception(name + ": board overflows its window");
@@ -277,10 +277,7 @@ crowded.Dismiss();
 Console.WriteLine("PASS long notes: 300 Unicode scalars, 18/20/28px, final-line scrolling, bounded columns, 150/200% rendering");
 
 var dutyNote = Item("note", new DisplayContent(Text: "白板：同学甲\n扫地：同学乙", Color: "green", Duty: true));
-var oldDuty = dutyNote with { Content = dutyNote.Content with { Duty = false }, TeacherName = "今日值日", StartsAt = DateTimeOffset.Parse("2000-01-01T00:00:00Z") };
 var ordinary = Item("note", new DisplayContent(Text: "普通绿色便签", Color: "green"));
-if (!NotesWindow.IsDuty(dutyNote) || !NotesWindow.IsDuty(oldDuty) || NotesWindow.IsDuty(ordinary)
-    || NotesWindow.IsDuty(ordinary with { TeacherName = "今日值日" })) throw new Exception("duty: legacy matching confuses ordinary notes");
 var dutyWindow = new NotesWindow();
 dutyWindow.Present([dutyNote, ordinary], [], today); dutyWindow.Show(); Dispatcher.UIThread.RunJobs();
 var dutyCard = (Border)dutyWindow.Cards.Children[0]; var greenCard = (Border)dutyWindow.Cards.Children[1];
@@ -289,7 +286,7 @@ if (dutyCard.Tag as string != "duty-card" || dutyCard.Background?.ToString() == 
 AvaloniaHeadlessPlatform.ForceRenderTimerTick(); Dispatcher.UIThread.RunJobs();
 using (var frame = dutyWindow.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "duty-card.png"));
 dutyWindow.Dismiss();
-Console.WriteLine("PASS duty: dedicated card and legacy compatibility without confusing green notes");
+Console.WriteLine("PASS duty: dedicated card distinct from green notes");
 
 var orderedBoard = new BoardWindow { Width = 1000, Height = 700 };
 orderedBoard.Present([Item("board", new DisplayContent("顺序测试", ["第三条先", "第一条中", "第二条后"]), "李老师")], []);

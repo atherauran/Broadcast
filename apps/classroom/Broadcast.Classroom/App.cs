@@ -46,7 +46,7 @@ public sealed class App : Application
                 {
                     var device = LocalState.LoadDevice();
                     if (device is not null && _config.IsConfigured) { LocalState.EnableAutoStart(); await StartAsync(device); }
-                    else ShowSettings(notice: LocalState.HasLegacySession ? "程序已更新，需要重新绑定。若班级显示已绑定，请先在老师端的设备管理中解绑。" : null);
+                    else ShowSettings();
                 }
                 catch (Exception e) { LocalState.Log(e); ShowSettings(notice: "设备登录信息无法读取，请重新绑定。"); }
             });
@@ -80,16 +80,14 @@ public sealed class App : Application
         var clock = new ServerClock();
         _speech = new TencentSpeechSynthesizer(_config.Tts, clock);
         var outbox = new ReceiptOutbox(Path.Combine(LocalState.Folder, "receipts-" + device.Id + ".json"));
-        var audio = new SharedAudio(new AudioPlayer());
+        var audio = new AudioPlayer();
         var alerts = new BroadcastDisplay();
         var banners = new BannerLane(_backend, new BannerDisplay(alerts), outbox, clock);
         banners.Error += LocalState.Log;
-        var queue = new DeliveryQueue(_backend, alerts, _speech, audio.Primary, outbox, clock, banners);
-        var reader = new BoardReader(_speech, audio.Secondary);
-        reader.Error += LocalState.Log;
-        var screen = new StateDisplay(clock, alerts, audio.Primary);
+        var queue = new DeliveryQueue(_backend, alerts, _speech, audio, outbox, clock, banners);
+        var screen = new StateDisplay(clock, alerts, audio);
         screen.Error += LocalState.Log;
-        var display = new DisplayState(screen, clock, reader);
+        var display = new DisplayState(screen, clock);
         display.Error += LocalState.Log;
         var files = new FileTransferReceiver(_backend, outbox, clock, Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             Path.Combine(LocalState.Folder, "files-" + device.Id));

@@ -4,14 +4,11 @@ namespace Broadcast.Core;
 
 // Holds the server's desired screen state in memory only and applies whatever is due by the calibrated clock,
 // so items expire on time without the server pushing anything.
-public sealed class DisplayState(IStateDisplay display, ServerClock clock, BoardReader reader, Func<TimeSpan, CancellationToken, Task>? delay = null)
+public sealed class DisplayState(IStateDisplay display, ServerClock clock, Func<TimeSpan, CancellationToken, Task>? delay = null)
 {
     public static readonly TimeSpan CountdownLinger = TimeSpan.FromSeconds(5);
-    // A restart (or a late sync) must not read an old board aloud again, and nothing is kept on disk to remember it.
-    public static readonly TimeSpan ReadWindow = TimeSpan.FromSeconds(60);
     private readonly Func<TimeSpan, CancellationToken, Task> _delay = delay ?? Task.Delay;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly HashSet<Guid> _read = [];
     private Desired _desired = new([], null, null);
     private string _shown = "";
     public event Action<Exception>? Error;
@@ -57,7 +54,6 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
         }
         finally
         {
-            reader.Retain([]);
             await display.ApplyAsync([], null, []);
         }
     }
@@ -74,9 +70,6 @@ public sealed class DisplayState(IStateDisplay display, ServerClock clock, Board
             var birthdays = Celebrations(desired.Birthdays, now);
             var signature = JsonSerializer.Serialize(new { visible, today, birthdays }, Json.Options);
             if (signature != _shown) { await display.ApplyAsync(visible, today, birthdays); _shown = signature; }
-            reader.Retain(visible.Select(item => item.Id));
-            foreach (var board in visible.Where(item => item.Kind == "board" && item.Content.Speak && now - item.StartsAt < ReadWindow))
-                if (_read.Add(board.Id)) reader.Start(board, ct);
         }
         finally { _gate.Release(); }
     }

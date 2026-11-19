@@ -25,8 +25,6 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Unchanged display state is not re-applied, removal is", DisplayDiff),
     ("The schedule shows the local weekday's lessons, Monday to Friday", ScheduleDays),
     ("Birthdays are greeted on the day, and weekend ones on Friday", BirthdayDays),
-    ("A board is read once, line by line, only near its start", BoardReadOnce),
-    ("A fullscreen broadcast cuts off board reading", PrimaryPreempts),
     ("Display payloads keep long notes, font sizes and board order", DisplayPayload),
     ("Files save without overwriting and survive receipt loss and restart", FileDownloads),
     ("Files reject unsafe names, partial downloads and expired work", FileFailures),
@@ -354,7 +352,7 @@ static DisplayItem Shown(string kind, DateTimeOffset start, DateTimeOffset end, 
 static async Task DisplaySchedule()
 {
     var clock = new ServerClock(); var now = DateTimeOffset.UtcNow; var screen = new FakeScreen();
-    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
+    var state = new DisplayState(screen, clock);
     var note = Shown("note", now.AddMinutes(10), now.AddMinutes(30)); var countdown = Shown("countdown", now, now.AddMinutes(5));
     await state.UpdateAsync([note, countdown], null, null, default);
     Check(screen.Last.Select(i => i.Kind).SequenceEqual(new[] { "countdown" }), "Scheduled note shown early");
@@ -366,7 +364,7 @@ static async Task DisplaySchedule()
 static async Task DisplayDiff()
 {
     var clock = new ServerClock(); var now = clock.Now; var screen = new FakeScreen();
-    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
+    var state = new DisplayState(screen, clock);
     var note = Shown("note", now.AddMinutes(-1), now.AddMinutes(30));
     await state.UpdateAsync([note], null, null, default); await state.UpdateAsync([note with { }], null, null, default);
     Check(screen.Applied.Count == 1, "Same state was applied twice");
@@ -380,7 +378,7 @@ static Task DisplayPayload()
     var restored = JsonSerializer.Deserialize<DisplayItem>(JsonSerializer.Serialize(item, Json.Options), Json.Options)!;
     Check(restored.Content.Text == text && restored.Content.NoteFontSize == 28, "Long note lost text or its selected size");
     var old = JsonSerializer.Deserialize<DisplayContent>("{\"text\":\"旧便签\"}", Json.Options)!;
-    Check(old.NoteFontSize == 20 && !old.Duty, "Legacy payload changed defaults");
+    Check(old.NoteFontSize == 20 && !old.Duty, "Missing fields changed defaults");
     Check(new DisplayContent(FontSize: 18).NoteFontSize == 18 && new DisplayContent(FontSize: 24).NoteFontSize == 24
         && new DisplayContent(FontSize: 10).NoteFontSize == 18 && new DisplayContent(FontSize: 48).NoteFontSize == 28
         && new DisplayContent(FontSize: double.NaN).NoteFontSize == 20, "Note size range");
@@ -400,7 +398,7 @@ static async Task BirthdayDays()
         && DisplayState.Celebrations(list, At(2028, 2, 29)).Single().Name == "闰日", "29 February");
     Check(DisplayState.Celebrations(null, At(2026, 10, 16)).Length == 0, "Missing list");
     var clock = new ServerClock(); var screen = new FakeScreen();
-    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
+    var state = new DisplayState(screen, clock);
     clock.Sync(At(2026, 10, 15)); await state.UpdateAsync([], null, list, default);
     Check(screen.Birthdays.Single().Name == "周四", "Birthday not applied");
     clock.Sync(At(2026, 10, 16)); await state.UpdateAsync([], null, list, default);
@@ -415,37 +413,13 @@ static async Task ScheduleDays()
     Check(DisplayState.Today(week, At(14)) is null && DisplayState.Today(week, At(17)) is null && DisplayState.Today(week, At(18)) is null, "Empty day or weekend shown");
     Check(DisplayState.Today(null, At(12)) is null, "Missing schedule shown");
     var clock = new ServerClock(); var screen = new FakeScreen();
-    var state = new DisplayState(screen, clock, new BoardReader(new FakeSpeech(), new FakeAudio()));
+    var state = new DisplayState(screen, clock);
     clock.Sync(At(12)); await state.UpdateAsync([], week, null, default);
     Check(screen.Today?.Periods.Length == 2, "Schedule not applied");
     await state.UpdateAsync([], week, null, default); Check(screen.Applied.Count == 1, "Same schedule applied twice");
     clock.Sync(At(13)); await state.UpdateAsync([], week, null, default);
     Check(screen.Applied.Count == 2 && screen.Today?.Periods.Single() == "math", "Schedule did not move to the next day");
     clock.Sync(At(17)); await state.UpdateAsync([], week, null, default); Check(screen.Today is null, "Weekend still shows a schedule");
-}
-static async Task BoardReadOnce()
-{
-    var clock = new ServerClock(); var now = clock.Now; var speech = new FakeSpeech(); var audio = new FakeAudio();
-    var state = new DisplayState(new FakeScreen(), clock, new BoardReader(speech, audio));
-    var entries = Enumerable.Range(1, 12).Select(i => $"第{i}条：" + new string('字', 95)).ToArray();
-    var board = Shown("board", now.AddSeconds(-5), now.AddHours(1), new DisplayContent("本周公告", entries, true, 101011));
-    await state.UpdateAsync([board], null, null, default); await state.UpdateAsync([board], null, null, default);
-    await Until(() => audio.Played == 13);
-    Check(speech.Calls == 13 && speech.VoiceTypes.All(v => v == 101011), "Each line should be one short synthesis");
-    var old = Shown("board", now.AddMinutes(-5), now.AddHours(1), new DisplayContent("旧公告", ["已经过了朗读时间"], true));
-    await state.UpdateAsync([board, old], null, null, default); await Task.Delay(30);
-    Check(speech.Calls == 13, "A board seen long after its start was read aloud");
-}
-static async Task PrimaryPreempts()
-{
-    var device = new FakeAudio { Gate = new(TaskCreationOptions.RunContinuationsAsynchronously) };
-    var shared = new SharedAudio(device);
-    var reading = shared.Secondary.PlayAsync([1], () => { }, default);
-    await Until(() => device.Played == 1);
-    var alert = shared.Primary.PlayAsync([1], () => { }, default);
-    try { await reading; throw new Exception("Board reading was not interrupted"); } catch (OperationCanceledException) { }
-    try { await shared.Secondary.PlayAsync([1], () => { }, default); throw new Exception("Board started over a broadcast"); } catch (OperationCanceledException) { }
-    device.Gate.SetResult(); await alert;
 }
 
 sealed class Harness : IAsyncDisposable

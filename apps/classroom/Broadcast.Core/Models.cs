@@ -36,8 +36,8 @@ public sealed record PendingBatch(DateTimeOffset ServerNow, Delivery[] Items);
 public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt, string TeacherName = "未知老师", int RepeatCount = 1, bool AutoClose = true,
     string Emotion = "normal", int VoiceType = 101001, string Style = "fullscreen", string BannerPosition = "top");
-// One record for every kind: board uses Title/Entries/Speak/VoiceType/Theme/Flag, note Text/Color, countdown Label/Fullscreen, or Date for a day count.
-public sealed record DisplayContent(string? Title = null, string[]? Entries = null, bool Speak = false, int VoiceType = 101001,
+// One record for every kind: board uses Title/Entries/Theme/Flag, note Text/Color, countdown Label/Fullscreen, or Date for a day count.
+public sealed record DisplayContent(string? Title = null, string[]? Entries = null,
     string? Text = null, string? Color = null, string? Label = null, bool Fullscreen = false, string? Date = null, string? Theme = null, bool Flag = false,
     double? FontSize = null, bool Duty = false)
 {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inLesson, lessonTimes, daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validDraft, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { inLesson, lessonTimes, daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validAlert, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -15,7 +15,7 @@ describe('truthful device status', () => {
   });
   it('keeps text-only distinct from played', () => { expect(deliveryStatus({ ...d, displayed_at: 'time', audio_error: 'failed', finished_at: 'time' }, b, now).label).toBe('语音失败，仅显示文字'); });
   it('labels a deliberate zero-repeat broadcast as text-only', () => { expect(deliveryStatus({ ...d, displayed_at: 'time', finished_at: 'time' }, { ...b, repeat_count: 0 }, now).label).toBe('已完成（仅文字）'); });
-  it('requires nonempty text and targets with a 300 code point limit', () => { expect(validDraft('  ', ['8-1'])).toBe(false); expect(validDraft('你好', [])).toBe(false); expect(validDraft('🎒'.repeat(300), ['8-1'])).toBe(true); expect(validDraft('字'.repeat(301), ['8-1'])).toBe(false); });
+  it('requires nonempty text with a 300 code point limit', () => { expect(validAlert('  ')).toBe(false); expect(validAlert('🎒'.repeat(300))).toBe(true); expect(validAlert('字'.repeat(301))).toBe(false); });
   it('requires a teacher name on the new login', () => { expect(validTeacherName('王老师')).toBe(true); expect(validTeacherName(' ')).toBe(false); expect(validTeacherName('字'.repeat(41))).toBe(false); });
 });
 describe('broadcast templates', () => {
@@ -55,7 +55,7 @@ describe('display styles', () => {
     expect(countdownError('until', 0, '13:00', local)).toBe('结束时间已过'); expect(countdownError('until', 0, '15:40', local)).toBe('');
   });
   it('lists scheduled boards by start time before drafts, one per request', () => {
-    const content = { title: '晨会通知', entries: ['升旗'], speak: false, voice_type: 101001 };
+    const content = { title: '晨会通知', entries: ['升旗'] };
     const board = (id: string, request: string, classroom: string, start: number): DisplayItem => ({ id, request_id: request, classroom_id: classroom, kind: 'board', content,
       starts_at: new Date(start).toISOString(), ends_at: new Date(start + 3_600_000).toISOString(), teacher_name: '李老师', created_at: new Date(local).toISOString() });
     // "now" sent right away: created and started on the server a moment after the page's clock last ticked.

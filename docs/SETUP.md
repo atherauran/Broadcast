@@ -5,7 +5,7 @@ The production Supabase project `kmuuixuiipqxzeyoawap` already has its database,
 ## Supabase
 
 1. Create a Supabase project and note the project URL and publishable/anon key. Clients use only the public key; never put the service_role key in them. The current URL is `https://kmuuixuiipqxzeyoawap.supabase.co`.
-2. Link the project with the Supabase CLI and apply every SQL file in `supabase/migrations` in filename order. `202609120001_broadcast_options.sql` adds the teacher name, repeat count, close mode, emotion and voice fields, and updates the send and pending queries. `202610040001_heartbeat_120s.sql` changes the offline threshold to 270 seconds.
+2. Link the project with the Supabase CLI and apply every SQL file in `supabase/migrations` in filename order.
 3. Keep Auth self-signup disabled. Create one email/password user such as `admin@broadcast.local`, confirm the email, and set `app_metadata.role` to `admin` through the trusted Admin API. Use **app_metadata**, never the user-writable user_metadata. The admin email in the teacher and classroom apps must match. The maintainer who handles teacher feedback has a second user, `maintainer@broadcast.local` (or `VITE_MAINTAINER_EMAIL`), with its own password and `app_metadata` set to `{"role": "admin", "maintainer": true}`; signing in with that password on the same login form changes feedback statuses and marks comments as the maintainer's. Homeroom teachers are rows in `public.homerooms` (class, name, other names); each creates their own `homeroom-<class>@broadcast.local` account from the teacher app (see the contract's Homeroom teachers section).
 4. Deploy the `broadcast-api` Edge Function. `supabase/config.toml` sets `verify_jwt=false` for it, but the function calls `auth.getUser(token)` on every request and checks admin or device permissions, so do not remove that check.
 5. The only function secret needed is `ALLOWED_ORIGINS`. The teacher app's five preview audio clips ship with the static site, so Supabase holds no Tencent Cloud credentials.
@@ -76,14 +76,8 @@ For the first integration test, use at least one Windows x64 PC and complete rec
 
 ## File transfers
 
-Apply `20261110091904_file_transfers.sql`, `20261110091908_file_transfer_cleanup.sql`, `20261110093311_file_cleanup_timeout.sql` and `202611120002_file_limit_10mb.sql`, then redeploy `broadcast-api` before using the new teacher and classroom apps. The migrations create the private `classroom-files` bucket (10 MiB per object), enable `pg_cron` and `pg_net`, generate a dedicated cleanup token in Supabase Vault, and schedule Storage cleanup every 15 minutes. No service key or cleanup token belongs in either client. For a different project, change the cleanup migration's function URL before applying it.
-
-The feature caps outstanding reservations/stored transfer files at 200 MiB and keeps a sent file available for 24 hours. All-terminal transfers and abandoned uploads are removed sooner. This limits temporary storage; normal Supabase bandwidth quotas still apply to each classroom download. Check the `cleanup-classroom-files` Cron job and its HTTP response when diagnosing cleanup errors.
+The file-transfer migrations create the private `classroom-files` bucket (10 MiB per object), enable `pg_cron` and `pg_net`, generate a cleanup token in Supabase Vault and schedule Storage cleanup every 15 minutes. For a different project, change the function URL in the cleanup migration before applying it. When diagnosing cleanup errors, check the `cleanup-classroom-files` Cron job and its HTTP response.
 
 ## Bazaar statistics
 
-Apply `202611120001_bazaar.sql` before publishing the teacher app or distributing the new classroom app. It adds the default-on per-class display setting, the `bazaar_entries` ledger, scoped device RPCs and the Realtime publication entry. This feature needs no new secrets, Storage bucket or Edge Function deployment. Existing clients continue to work but do not show bazaar statistics.
-
-Use the Test classroom for the first cloud integration test: add two groups, correct an amount and cancel a record, then toggle the teacher's display switch and restart the classroom app. The same corrected totals and full history should remain. Keep production class ledgers free of test entries; there is no automatic reset or purge.
-
-Apply `202611120003_bazaar_token_steps.sql` to require new bazaar income and corrections to be multiples of 5. Existing records are retained, and 0 still cancels a record. The updated classroom input defaults to 5 and steps by 5.
+No extra secrets, bucket or function deployment is needed. Use the Test classroom for a first integration test, and keep production ledgers free of test entries: there is no automatic reset or purge.

@@ -81,13 +81,12 @@ public sealed class FileTransferReceiver(IFileTransferBackend backend, ReceiptOu
 
     public static void Validate(FileTransfer file)
     {
-        // New sends are capped at 10 MiB by the server; still receive files sent under the former 20 MiB limit.
         var name = file.Filename;
         var stem = name.Split('.')[0].ToUpperInvariant();
         if (string.IsNullOrWhiteSpace(name) || name.Length > 180 || name.Any(c => c < 32 || "<>:\"/\\|?*".Contains(c))
             || name.EndsWith('.') || name.EndsWith(' ') || stem is "CON" or "PRN" or "AUX" or "NUL"
             || (stem.Length == 4 && (stem.StartsWith("COM") || stem.StartsWith("LPT")) && "123456789¹²³".Contains(stem[3]))
-            || file.SizeBytes is < 1 or > 20 * 1024 * 1024 || file.ObjectPath != file.TransferId + "/file")
+            || file.SizeBytes is < 1 or > 10 * 1024 * 1024 || file.ObjectPath != file.TransferId + "/file")
             throw new IOException("无效的传输文件");
     }
     private sealed record SavedFile(string Name, bool Complete);

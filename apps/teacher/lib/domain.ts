@@ -51,7 +51,6 @@ export interface Broadcast {
   deliveries: Delivery[];
 }
 export type Kind = 'alert' | 'banner' | 'board' | 'note' | 'countdown';
-export type DisplayKind = Exclude<Kind, 'alert' | 'banner'>;
 export const KINDS: { id: Kind; label: string }[] = [
   { id: 'alert', label: '全屏广播' },
   { id: 'banner', label: '横幅' },
@@ -76,7 +75,7 @@ export const BOARD_THEMES: { id: BoardTheme; label: string }[] = [
   { id: 'fresh', label: '清新' }, { id: 'tech', label: '科技' }, { id: 'safety', label: '提醒' },
 ];
 // flag adds a button that plays the national anthem with the flag in the classroom.
-export interface BoardContent { title: string; entries: string[]; speak: boolean; voice_type: number; theme?: BoardTheme; flag?: boolean }
+export interface BoardContent { title: string; entries: string[]; theme?: BoardTheme; flag?: boolean }
 export interface NoteContent { text: string; color: NoteColor; font_size?: number }
 export interface CountdownContent { label: string; fullscreen: boolean; date?: string }
 export type DisplayItem = {
@@ -161,9 +160,6 @@ export const sameContent = (a: object, b: object) => canonical(a) === canonical(
 export const chars = (value: string) => Array.from(value.trim()).length;
 export function validAlert(body: string): boolean {
   return chars(body) > 0 && chars(body) <= ALERT_LIMIT;
-}
-export function validDraft(body: string, selected: string[]): boolean {
-  return validAlert(body) && selected.length > 0;
 }
 export function validTeacherName(name: string): boolean {
   const length = Array.from(name.trim()).length;
@@ -276,7 +272,6 @@ export const SUBJECTS = [
   { id: 'art', label: '艺术 Art/Music' }, { id: 'it', label: '信息科技 IT' }, { id: 'elective', label: '选修 Optional' }, { id: 'club', label: '社团 Club' },
   { id: 'lunch', label: '午餐 Lunch' },
 ] as const;
-export const subjectLabel = (id: string) => SUBJECTS.find(subject => subject.id === id)?.label ?? id;
 export const SCHOOL_DAYS = ['周一', '周二', '周三', '周四', '周五'];
 export const DAY_PERIODS = 12;
 // Monday to Friday, each an ordered list of subject ids.

@@ -202,7 +202,7 @@ it('edits items that show the same thing, and hides boards that have not appeare
   const now = Date.now(); const onEdit = vi.fn(async () => true);
   const rooms: Classroom[] = ['8-1', '8-2'].map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
   const at = (ms: number) => new Date(ms).toISOString();
-  const content = { title: '通知', entries: ['带水杯'], speak: false, voice_type: 101001, theme: 'plain' as const };
+  const content = { title: '通知', entries: ['带水杯'], theme: 'plain' as const };
   const board = (id: string, classroom: string, start: number, title = content.title): DisplayItem => ({ id, request_id: id[0], classroom_id: classroom, kind: 'board',
     content: { ...content, title }, starts_at: at(start), ends_at: at(now + 3_600_000), teacher_name: '李老师', created_at: at(now) });
   // A realtime update lists the content keys in another order than the overview.
@@ -261,7 +261,7 @@ it('fills the morning meeting template and schedules a board for later', async (
   expect(host.querySelector('[aria-label="发布日期"]')).toBeNull();
 });
 it('lists a teacher\'s own saved boards and folds the other teachers\' ones', async () => {
-  const board = (id: string, teacher_name: string): SavedBoard => ({ id, content: { title: id, entries: ['升旗'], speak: false, voice_type: 101001 },
+  const board = (id: string, teacher_name: string): SavedBoard => ({ id, content: { title: id, entries: ['升旗'] },
     classrooms: ['8-4'], ends_at: null, publish_at: null, teacher_name, updated_at: '2026-10-18T00:00:00Z' });
   const onDelete = vi.fn();
   await act(async () => root.render(createElement(SavedBoards, { boards: [board('mine', '王老师'), board('a', '李老师'), board('b', '张老师')],
