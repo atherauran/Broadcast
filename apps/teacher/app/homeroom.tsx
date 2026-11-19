@@ -12,9 +12,9 @@ export function muteStatus(room: Classroom, now: number): string {
   return muted(room, now) ? `暂停中，至 ${time(room.mute_until)}` : `将在 ${time(room.mute_from)} – ${time(room.mute_until)} 暂停`;
 }
 
-export function HomeroomPanel({ room, now, ready, busy, onHide, onMute }: {
+export function HomeroomPanel({ room, now, ready, busy, onHide, onHideSchedule, onMute }: {
   room: Classroom; now: number; ready: boolean; busy: string;
-  onHide: (hidden: boolean) => Promise<boolean>; onMute: (from: string | null, until: string | null) => Promise<boolean>;
+  onHide: (hidden: boolean) => Promise<boolean>; onHideSchedule: (hidden: boolean) => Promise<boolean>; onMute: (from: string | null, until: string | null) => Promise<boolean>;
 }) {
   const [pausing, setPausing] = useState(false);
   const status = muteStatus(room, now);
@@ -25,6 +25,11 @@ export function HomeroomPanel({ room, now, ready, busy, onHide, onMute }: {
         <div><strong>教室桌面</strong><p className={room.screen_hidden ? 'paused' : 'muted'}>{room.screen_hidden ? '已清屏' : '正常显示'}</p></div>
         <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onHide(!room.screen_hidden)}>
           {room.screen_hidden ? '恢复桌面' : '一键清屏'}</Button>
+      </div>
+      <div className="homeroom-control">
+        <div><strong>课表</strong><p className={room.schedule_hidden ? 'paused' : 'muted'}>{room.schedule_hidden ? '已隐藏' : '正常显示'}</p></div>
+        <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onHideSchedule(!room.schedule_hidden)}>
+          {room.schedule_hidden ? '显示课表' : '隐藏课表'}</Button>
       </div>
       <div className="homeroom-control">
         <div><strong>其他老师的广播</strong><p className={status ? 'paused' : 'muted'}>{status || '正常接收'}</p></div>

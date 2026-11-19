@@ -65,7 +65,7 @@ it('hides and restores a classroom desktop with one click', async () => {
   const onHide = vi.fn().mockResolvedValue(true); const onHideSchedule = vi.fn().mockResolvedValue(true);
   const room: Classroom = { id: '8-1', device_id: 'pc', device_name: '8-1 电脑', connected: true, last_seen_at: null };
   const render = (screen_hidden: boolean, schedule_hidden = false) => act(async () => root.render(createElement(Devices, { rooms: [{ ...room, screen_hidden, schedule_hidden }], now: 0, ready: true, busy: '',
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide, onHideSchedule, onBazaar: vi.fn() })));
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide, onHideSchedule })));
   await render(false);
   await click('隐藏桌面'); expect(onHide).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), true);
   await render(true);
@@ -76,26 +76,6 @@ it('hides and restores a classroom desktop with one click', async () => {
   await render(false, true);
   expect(host.textContent).toContain('课表已隐藏');
   await click('显示课表'); expect(onHideSchedule).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), false);
-});
-it('defaults bazaar display to on and toggles it separately for each class', async () => {
-  const onBazaar = vi.fn().mockResolvedValue(true);
-  const rooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
-  const render = (enabled?: boolean, busy = '') => act(async () => root.render(createElement(Devices, {
-    rooms: rooms.map((room, i) => i === 0 ? { ...room, bazaar_enabled: enabled } : room), now: 0, ready: true, busy,
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onHideSchedule: vi.fn(), onBazaar,
-  })));
-  await render();
-  const switches = () => [...host.querySelectorAll<HTMLInputElement>('[role="switch"]')];
-  expect(switches()).toHaveLength(6);
-  expect(switches().every(input => input.checked)).toBe(true);
-  await act(async () => switches()[0].click());
-  expect(onBazaar).toHaveBeenCalledWith(expect.objectContaining({ id: '8-1' }), false);
-  await render(false);
-  expect(switches()[0].checked).toBe(false);
-  expect(switches().slice(1).every(input => input.checked)).toBe(true);
-  await act(async () => switches()[0].click());
-  expect(onBazaar).toHaveBeenLastCalledWith(expect.objectContaining({ id: '8-1' }), true);
-  await render(true, 'bazaar'); expect(switches().every(input => input.disabled)).toBe(true);
 });
 it('mounts the complete app and modal provider without configured cloud credentials', () => {
   expect(host.textContent).toContain('广播服务尚未配置');
@@ -328,27 +308,34 @@ it('combines birthdays and schedules under class affairs with one class selectio
   expect(host.textContent).toContain('8-2 学生生日');
   expect(host.querySelector<HTMLInputElement>('[aria-label="第 1 位姓名"]')!.value).toBe('张三');
 });
-it('lets a homeroom teacher clear the screen and lift a pause', async () => {
-  const onHide = vi.fn().mockResolvedValue(true);
+it('lets a homeroom teacher clear the screen, hide the timetable and lift a pause', async () => {
+  const onHide = vi.fn().mockResolvedValue(true); const onHideSchedule = vi.fn().mockResolvedValue(true);
   const onMute = vi.fn().mockResolvedValue(true);
   const now = Date.parse('2026-11-18T02:00:00Z');
   const room: Classroom = { id: '8-2', device_id: 'pc', device_name: null, connected: true, last_seen_at: null, own: true, manage: true,
     mute_from: '2026-11-18T01:00:00Z', mute_until: '2026-11-18T09:00:00Z' };
-  await act(async () => root.render(createElement(HomeroomPanel, { room, now, ready: true, busy: '', onHide, onMute })));
+  await act(async () => root.render(createElement(HomeroomPanel, { room, now, ready: true, busy: '', onHide, onHideSchedule, onMute })));
   expect(host.textContent).toContain('暂停中');
   await click('一键清屏'); expect(onHide).toHaveBeenCalledWith(true);
+  await click('隐藏课表'); expect(onHideSchedule).toHaveBeenCalledWith(true);
   await click('解除暂停'); expect(onMute).toHaveBeenCalledWith(null, null);
-  await act(async () => root.render(createElement(HomeroomPanel, { room: { ...room, mute_until: '2026-11-18T01:30:00Z' }, now, ready: true, busy: '', onHide, onMute })));
+  await act(async () => root.render(createElement(HomeroomPanel, { room: { ...room, mute_until: '2026-11-18T01:30:00Z' }, now, ready: true, busy: '', onHide, onHideSchedule, onMute })));
   expect(host.textContent).toContain('正常接收');
   await click('暂停接收');
   await click('暂停', document.body);
   expect(onMute).toHaveBeenLastCalledWith(null, expect.any(String));
 });
-it('locks the desktop switch of a class claimed by another homeroom teacher', async () => {
-  const room: Classroom = { id: '8-2', device_id: 'pc', device_name: null, connected: true, last_seen_at: null, manage: false,
+it('leaves the desktop and timetable buttons to the homeroom teacher of a claimed class', async () => {
+  const claimed: Classroom = { id: '8-2', device_id: 'pc', device_name: null, connected: true, last_seen_at: null, manage: false,
     homeroom: { teacher_name: 'Mr. Steven', claimed: true, mine: false } };
-  await act(async () => root.render(createElement(Devices, { rooms: [room], now: 0, ready: true, busy: '',
-    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onHideSchedule: vi.fn(), onBazaar: vi.fn() })));
+  const render = (room: Classroom) => act(async () => root.render(createElement(Devices, { rooms: [room], now: 0, ready: true, busy: '',
+    onBack: vi.fn(), onUnbind: vi.fn(), onHide: vi.fn(), onHideSchedule: vi.fn() })));
+  const labels = () => [...host.querySelectorAll('button')].map(b => b.textContent);
+  await render(claimed);
   expect(host.textContent).toContain('班主任 Mr. Steven');
-  expect([...host.querySelectorAll('button')].find(b => b.textContent === '隐藏桌面')!.disabled).toBe(true);
+  expect(labels()).not.toContain('隐藏桌面'); expect(labels()).not.toContain('隐藏课表'); expect(labels()).toContain('解绑');
+  await render({ ...claimed, manage: true, own: true });
+  expect(labels()).toContain('隐藏桌面'); expect(labels()).toContain('隐藏课表');
+  await render({ ...claimed, manage: true, homeroom: { ...claimed.homeroom!, claimed: false } });
+  expect(labels()).toContain('隐藏桌面');
 });

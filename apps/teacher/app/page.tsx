@@ -427,7 +427,7 @@ export default function App() {
         onClaim={password => run('claim', () => claimHomeroom(homeroom.classroom_id, password))} />}
       {sw.needRefresh[0] && <div className="feedback info">有新版本可用<Button variant="link" onClick={() => void sw.updateServiceWorker(true)} disabled={!!busy}>更新应用</Button></div>}
       {tab === 'send' && <>
-        {myRoom && <HomeroomPanel room={myRoom} now={now} ready={ready} busy={busy} onHide={hidden => hideScreen(myRoom, hidden)}
+        {myRoom && <HomeroomPanel room={myRoom} now={now} ready={ready} busy={busy} onHide={hidden => hideScreen(myRoom, hidden)} onHideSchedule={hidden => hideSchedule(myRoom, hidden)}
           onMute={(from, until) => run('mute', async () => {
             await rpc('set_broadcast_mute', { p_classroom: myRoom.id, p_from: from, p_until: until });
             await refreshRooms();
@@ -505,10 +505,6 @@ export default function App() {
           })} />}
       </>}
       {tab === 'devices' && <Devices rooms={visibleRooms} now={now} ready={ready} busy={busy} onBack={() => setTab('send')} onHideSchedule={hideSchedule}
-        onBazaar={(room, enabled) => run('bazaar', async () => {
-          await rpc('set_bazaar_enabled', { p_classroom: room.id, p_enabled: enabled });
-          setRooms(old => old.map(item => item.id === room.id ? { ...item, bazaar_enabled: enabled } : item));
-        })}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })}
         onHide={hideScreen} />}
     </main>

@@ -128,7 +128,7 @@ Every 15 minutes, `pg_cron`/`pg_net` invoke `broadcast-api` with a dedicated ran
 
 ## Bazaar statistics
 
-`classrooms.bazaar_enabled` defaults to true and is included in `classroom_status`. The admin-only `set_bazaar_enabled(p_classroom, p_enabled)` controls the statistics window. `screen_hidden` also hides it. Neither switch deletes income.
+`classrooms.bazaar_enabled` defaults to true and is included in `classroom_status`. The admin-only `set_bazaar_enabled(p_classroom, p_enabled)` controls the statistics window. The teacher app has no control for it. `screen_hidden` also hides it. Neither switch deletes income.
 
 The classroom input asks for the group leader’s name (up to 29 characters) and appends `组` when saving `group_name`: 张三 becomes 张三组. Selecting an existing group or correcting an entry removes the final `组` when filling the leader field, so saving again keeps the same group name.
 
