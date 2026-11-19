@@ -268,7 +268,7 @@ it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   await act(async () => (host.querySelector('[aria-label="删除第 2 节"]') as HTMLButtonElement).click());
   expect(selects()).toEqual(['english', 'lunch']);
   await day('周二'); expect(selects()).toEqual([]); await click('体育 PE');
-  expect(host.querySelector('.day-tabs')?.textContent).toContain('周一2 节');
+  expect(host.querySelector('.day-tabs')?.textContent).toContain('周一1 节');
   await click('发布'); await click('班务');
   expect(host.querySelector('.day-tabs')?.textContent).toContain('周二1 节');
   const save = () => Array.from(host.querySelectorAll('button')).find(b => b.textContent?.includes('保存 8-2 课表/值日'))!;
@@ -280,6 +280,18 @@ it('builds a weekly schedule day by day and keeps it across tabs', async () => {
   await type(host.querySelector<HTMLInputElement>('[aria-label="第 1 项值日"]')!, '');
   await type(host.querySelector<HTMLInputElement>('[aria-label="周三第 1 项值日生"]')!, 'Eva');
   expect(host.querySelector('.duty-task.invalid')).not.toBeNull();
+});
+it('leaves rest rows out of the lesson numbers and the day\'s count, and takes a typed subject that already exists', async () => {
+  await click('班务'); await click('8-2');
+  await act(async () => Array.from(host.querySelectorAll<HTMLButtonElement>('.day-tabs button')).find(b => b.textContent?.startsWith('周一'))!.click());
+  for (const subject of ['英语 English', '午餐 Lunch', '体育 PE']) await click(subject);
+  const numbers = () => Array.from(host.querySelectorAll('.period-list .entry-number')).map(number => number.textContent);
+  expect(numbers()).toEqual(['1', '', '2']);
+  expect(host.querySelector('.day-tabs')?.textContent).toContain('周一2 节');
+  await type(host.querySelector<HTMLInputElement>('[aria-label="新课程名称"]')!, 'pe');
+  await act(async () => host.querySelector<HTMLFormElement>('.subject-add')!.requestSubmit());
+  expect(Array.from(host.querySelectorAll<HTMLSelectElement>('.period-select')).map(select => select.value)).toEqual(['english', 'lunch', 'pe', 'pe']);
+  expect(numbers()).toEqual(['1', '', '2', '3']);
 });
 it('combines birthdays and schedules under class affairs with one class selection and preserved drafts', async () => {
   expect([...host.querySelectorAll('nav[aria-label="主要导航"] button')].map(b => b.textContent?.trim()))

@@ -30,8 +30,9 @@ public sealed record RegisteredDevice(DeviceCredential Credential, string Classr
 public sealed record Classroom(string Id, string? DeviceId, string? DeviceName, string? LastSeenAt, bool Connected);
 public sealed record ClassroomStatus(DateTimeOffset ServerNow, Classroom[] Classrooms);
 // Schedule is the class's week, Monday first, as subject ids; null when none is set. Birthdays likewise, null when none are set.
+// Catalog names those subjects and gives the grade's lesson times; it is null with the schedule, and from a server that predates it.
 public sealed record Heartbeat(bool Active, string? ClassroomId, DateTimeOffset ServerNow, DisplayItem[]? Display = null, string[][]? Schedule = null,
-    Birthday[]? Birthdays = null);
+    Birthday[]? Birthdays = null, Catalog? Catalog = null);
 public sealed record PendingBatch(DateTimeOffset ServerNow, Delivery[] Items);
 public sealed record Delivery(Guid DeliveryId, Guid BroadcastId, string Body, DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt, string TeacherName = "未知老师", int RepeatCount = 1, bool AutoClose = true,
@@ -44,8 +45,13 @@ public sealed record DisplayContent(string? Title = null, string[]? Entries = nu
     public double NoteFontSize => FontSize is { } size && double.IsFinite(size) ? Math.Clamp(size, 18, 28) : 20;
 }
 public sealed record DisplayItem(Guid Id, string Kind, DisplayContent Content, DateTimeOffset StartsAt, DateTimeOffset EndsAt, string TeacherName);
-public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items, string[][]? Schedule = null, Birthday[]? Birthdays = null);
-public sealed record DaySchedule(DateOnly Date, string[] Periods);
+public sealed record DisplayBatch(DateTimeOffset ServerNow, DisplayItem[] Items, string[][]? Schedule = null, Birthday[]? Birthdays = null, Catalog? Catalog = null);
+// A rest subject (lunch) takes no lesson number. Bells are, Monday first, each day's "HH:mm-HH:mm" of lesson 1, 2, 3 and so on.
+public sealed record Subject(string Label, bool Rest = false);
+public sealed record Catalog(Dictionary<string, Subject> Subjects, string[][] Bells);
+// One row of today's timetable; the times are missing when no bell covers it.
+public sealed record Lesson(string Name, bool Rest, TimeOnly? Start, TimeOnly? End);
+public sealed record DaySchedule(DateOnly Date, Lesson[] Lessons);
 // Date is "MM-DD"; a celebration is one birthday greeted today, On being the birthday itself (a weekend day when greeted on Friday).
 public sealed record Birthday(string Name, string Date);
 public sealed record Celebration(string Name, DateOnly On);

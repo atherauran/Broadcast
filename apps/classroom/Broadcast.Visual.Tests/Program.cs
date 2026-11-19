@@ -311,7 +311,13 @@ dayWindow.Dismiss();
 
 var schedule = new ScheduleWindow();
 var monday = new DateOnly(2026, 10, 12);
-schedule.Present(new DaySchedule(monday, ["english", "math", "physics", "chemistry", "lunch", "morality", "it", "pe", "club"]));
+// The school's bells: four lessons, lunch, then five more; Wednesday's last lesson starts 5 minutes earlier than on any other day.
+string[] bell = ["08:30-09:10", "09:25-10:05", "10:20-11:00", "11:15-11:50", "12:40-13:20", "13:35-14:15", "14:30-15:10", "15:25-16:05", "16:20-17:00"];
+var catalog = new Catalog(new[] { "english", "chinese", "math", "physics", "chemistry", "biology", "history", "pe", "morality", "art", "it", "club" }
+    .ToDictionary(id => id, id => new Subject(id switch { "english" => "英语 English", "math" => "数学 Math", "physics" => "物理 Physics", "chemistry" => "化学 Chemistry", _ => id }))
+    .Append(new("lunch", new Subject("午餐 Lunch", true))).ToDictionary(), [bell, bell, [.. bell[..8], "16:15-16:55"], bell, bell]);
+Lesson[] Lessons(DayOfWeek day, params string[] ids) => DisplayState.Lessons(ids, catalog, day);
+schedule.Present(new DaySchedule(monday, Lessons(DayOfWeek.Monday, "english", "math", "physics", "chemistry", "lunch", "morality", "it", "pe", "club")));
 schedule.Show(); Dispatcher.UIThread.RunJobs();
 TextBlock Cell(int row, int index) => ((Border)schedule.Rows.Children[row]).Child switch { Viewbox v => (TextBlock)v.Child!, var c => (TextBlock)((StackPanel)c!).Children[index] };
 var lunch = (Border)schedule.Rows.Children[5];
@@ -320,14 +326,14 @@ if (schedule.Topmost || schedule.ShowInTaskbar || schedule.Rows.Children.Count !
     throw new Exception("schedule: header, rows, times or lunch row failed");
 // 8-4's Wednesday: four lessons, lunch, five more; its last break is 10 minutes, so the 9th lesson starts 5 minutes earlier than any other day.
 string[] nine = ["chinese", "chinese", "math", "pe", "lunch", "english", "english", "physics", "biology", "club"];
-string Clock(DayOfWeek day) => string.Join(" ", ScheduleWindow.Times(nine, day).Select(t => $"{t.Start:H:mm}-{t.End:H:mm}"));
+string Clock(DayOfWeek day) => string.Join(" ", Lessons(day, nine).Select(t => $"{t.Start:H:mm}-{t.End:H:mm}"));
 if (Clock(DayOfWeek.Wednesday) != "8:30-9:10 9:25-10:05 10:20-11:00 11:15-11:50 11:50-12:40 12:40-13:20 13:35-14:15 14:30-15:10 15:25-16:05 16:15-16:55")
     throw new Exception("schedule: Wednesday lesson times are wrong: " + Clock(DayOfWeek.Wednesday));
 if (!Clock(DayOfWeek.Monday).EndsWith("15:25-16:05 16:20-17:00")) throw new Exception("schedule: other days keep 15-minute breaks: " + Clock(DayOfWeek.Monday));
 if (schedule.RowHeight < 40) throw new Exception("schedule: rows must fill the column readably");
 using (var frame = schedule.CaptureRenderedFrame()) frame?.Save(Path.Combine(output, "schedule.png"));
 // A long day under tall day counts leaves short rows; each name and time must still fit its row.
-schedule.Present(new DaySchedule(monday, ["english", "math", "physics", "chemistry", "lunch", "morality", "it", "pe", "club", "art", "history", "biology"]));
+schedule.Present(new DaySchedule(monday, Lessons(DayOfWeek.Monday, "english", "math", "physics", "chemistry", "lunch", "morality", "it", "pe", "club", "art", "history", "biology")));
 schedule.Place(top: 560); Dispatcher.UIThread.RunJobs();
 foreach (var row in schedule.Rows.Children.OfType<Border>().Skip(1))
 {
@@ -356,7 +362,7 @@ full.Dismiss();
 // The whole screen through StateDisplay: every window must land in its column, under the topmost ones, and stay on screen.
 var (area, scale) = (screen.WorkingArea, screen.Scaling);
 var stateDisplay = new StateDisplay(clock, new BroadcastDisplay(), new SilentAudio());
-var week = new DaySchedule(monday, ["english", "math", "physics", "chemistry", "lunch", "morality", "art", "pe"]);
+var week = new DaySchedule(monday, Lessons(DayOfWeek.Monday, "english", "math", "physics", "chemistry", "lunch", "morality", "art", "pe"));
 var timer = Item("countdown", new DisplayContent(Label: "距离下课")) with { EndsAt = clock.Now.AddMinutes(20) };
 var festive = Item("board", new DisplayContent("国庆放假通知", ["10月1日至7日放假，8日正常上课", "假期外出注意安全"], Theme: "festive"));
 void Apply(string step, DaySchedule? today, params DisplayItem[] items)

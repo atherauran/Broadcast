@@ -1,6 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { readdir, readFile } from 'node:fs/promises';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { DEFAULT_BELLS } from '../lib/domain';
 const admin = '10000000-0000-4000-8000-000000000001';
 const first = '20000000-0000-4000-8000-000000000001';
 const second = '20000000-0000-4000-8000-000000000002';
@@ -396,6 +397,39 @@ describe('board themes and schedules', () => {
     expect(await scalar<string>('select status from feedback where id=$1', [id])).toBe('install');
     await identity(first); expect(await scalar<number>('select count(*)::int from feedback')).toBe(0);
     await expect(comment('伪造')).rejects.toThrow('管理员');
+  });
+  it('shares custom subjects and one grade-wide bell table, and sends both to the device', async () => {
+    const bells = DEFAULT_BELLS.map(day => [...day]);
+    await identity(admin, 'admin');
+    expect(await scalar<string>("select add_subject('  实验   课 ')")).toBe('实验 课');
+    expect(await scalar<string>("select add_subject('午休', true)")).toBe('午休');
+    for (const label of ['实验 课', 'MATH', '数学 math']) await expect(db.query('select add_subject($1)', [label])).rejects.toThrow('已有');
+    await expect(db.query("select add_subject('')")).rejects.toThrow('课程名');
+    await expect(db.query("select add_subject('一二三四五六七八九十一二三')")).rejects.toThrow('课程名');
+    await save('8-1', [['实验 课', '午休'], [], [], [], []]);
+    await expect(db.query("select delete_subject('实验 课')")).rejects.toThrow('使用');
+    await expect(db.query("select delete_subject('math')")).rejects.toThrow('无法删除');
+    await identity(first); await expect(db.query("select add_subject('偷偷加')")).rejects.toThrow('管理员');
+    await expect(db.query('select set_lesson_bells($1)', [JSON.stringify(bells)])).rejects.toThrow('管理员');
+    await identity(third);
+    type Catalog = { subjects: Record<string, { label: string; rest: boolean }>; bells: string[][] };
+    const state = await scalar<{ schedule: string[][]; catalog: Catalog }>('select device_heartbeat(true)');
+    expect(state.schedule[0]).toEqual(['实验 课', '午休']);
+    expect(state.catalog.subjects['午休']).toEqual({ label: '午休', rest: true });
+    expect(state.catalog.subjects.lunch).toEqual({ label: '午餐 Lunch', rest: true });
+    expect(state.catalog.bells).toEqual(DEFAULT_BELLS);
+    bells[0] = ['08:00-08:45', '09:00-09:45']; bells[2] = [];
+    await identity(admin, 'admin'); await db.query('select set_lesson_bells($1)', [JSON.stringify(bells)]);
+    await identity(third); expect((await scalar<{ catalog: Catalog }>('select display_state()')).catalog.bells).toEqual(bells);
+    await identity(admin, 'admin');
+    for (const bad of [bells.slice(0, 4), [...bells.slice(0, 4), Array(13).fill('08:00-08:30')], [...bells.slice(0, 4), ['8:00-9:00']], [...bells.slice(0, 4), ['09:00-08:00']],
+      [...bells.slice(0, 4), ['08:00-09:00', '08:30-09:30']], [...bells.slice(0, 4), ['08:00-24:00']]])
+      await expect(db.query('select set_lesson_bells($1)', [JSON.stringify(bad)])).rejects.toThrow(/作息表|时间/);
+    await db.query('select set_lesson_bells($1)', [JSON.stringify(DEFAULT_BELLS)]);
+    await db.exec('reset role; delete from schedules'); await identity(admin, 'admin');
+    await db.query("select delete_subject('实验 课')"); await db.query("select delete_subject('午休')");
+    expect(await scalar<number>('select count(*)::int from subjects')).toBe(14);
+    await identity(second); expect((await scalar<{ catalog: unknown }>('select display_state()')).catalog).not.toBeNull();
   });
   it('rejects malformed schedules and non-admin writes', async () => {
     await identity(admin, 'admin');

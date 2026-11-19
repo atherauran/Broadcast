@@ -23,7 +23,7 @@ Supabase provides auth, Postgres, Realtime and storage. Speech is synthesized on
 - **Broadcasts**: up to 300 characters, valid for 30 seconds, played in order with five voices, 0–4 repeats and five emotions. Each class reports received, displayed and played receipts, including after an offline period. A fullscreen broadcast during a lesson asks for confirmation.
 - **Banners**: a text strip of up to 80 characters at the top or bottom of the screen.
 - **Screen items**: boards (themes, flag-raising button, scheduled publishing), notes, countdowns and day counts. They are server state, kept in memory on the PC, and can be listed, copied, edited and removed together.
-- **Class affairs**: a weekly timetable, duty roster and student birthdays per class. Photos of a printed timetable or birthday list are read in the browser with PaddleOCR.
+- **Class affairs**: a weekly timetable, duty roster and student birthdays per class. Teachers can add their own subjects, which every teacher can then pick, and edit the grade-wide lesson times. Photos of a printed timetable or birthday list are read in the browser with PaddleOCR.
 - **Devices**: bind and unbind classroom PCs, hide a class's desktop, and let homeroom teachers pause other teachers' broadcasts to their class.
 - **File transfers**: one file of up to 10 MiB to selected classes, saved to each PC's desktop.
 - **Bazaar statistics**: a live ranking window with an append-only ledger and corrections.

@@ -474,17 +474,6 @@ internal sealed class ScheduleWindow : StateWindow
     private const double HeaderSize = 28, NameSize = 23, TimeSize = 17;
     private static readonly IBrush Ink = new SolidColorBrush(Color.Parse("#1F2937")).ToImmutable();
     private static readonly IBrush Lunch = new SolidColorBrush(Color.Parse("#FDEBC0")).ToImmutable();
-    private static readonly Dictionary<string, string> Names = new()
-    {
-        ["english"] = "英语 English", ["chinese"] = "语文 Chinese", ["math"] = "数学 Math", ["physics"] = "物理 Physics",
-        ["biology"] = "生物 Biology", ["chemistry"] = "化学 Chemistry", ["history"] = "历史 History", ["pe"] = "体育 PE",
-        ["morality"] = "道德与法治", ["art"] = "艺术 Art/Music", ["it"] = "信息科技 IT", ["elective"] = "选修 Optional", ["club"] = "社团 Club",
-        ["lunch"] = "午餐 Lunch",
-    };
-    // Lessons last 40 minutes with 15-minute breaks from 8:30 and from 12:40; the lesson before lunch ends 5 minutes early,
-    // and on Wednesday the break before the 9th lesson is only 10 minutes.
-    private static readonly TimeOnly MorningStart = new(8, 30), AfternoonStart = new(12, 40);
-    private const int Lesson = 40, Break = 15, LunchEarly = 5, WednesdayBreak = 10;
     private readonly StackPanel _rows = new();
     private DaySchedule? _today;
     internal StackPanel Rows => _rows;
@@ -502,46 +491,36 @@ internal sealed class ScheduleWindow : StateWindow
 
     public void Present(DaySchedule today) { _today = today; Relayout(); }
 
-    // Each row's start and end: lessons before lunch count from the morning start, those after it from the afternoon start.
-    internal static (TimeOnly Start, TimeOnly End)[] Times(string[] periods, DayOfWeek day)
-    {
-        var lunch = Array.IndexOf(periods, "lunch");
-        var times = new (TimeOnly Start, TimeOnly End)[periods.Length];
-        for (var i = 0; i < periods.Length; i++)
-        {
-            if (i == lunch) continue;
-            var morning = lunch < 0 || i < lunch;
-            var start = (morning ? MorningStart : AfternoonStart).AddMinutes((morning ? i : i - lunch - 1) * (Lesson + Break));
-            if (day == DayOfWeek.Wednesday && (morning ? i : i - 1) >= 8) start = start.AddMinutes(WednesdayBreak - Break);
-            times[i] = (start, start.AddMinutes(i == lunch - 1 ? Lesson - LunchEarly : Lesson));
-        }
-        if (lunch >= 0) times[lunch] = (lunch > 0 ? times[lunch - 1].End : AfternoonStart, AfternoonStart);
-        return times;
-    }
-
     // Rows share the height left below the day counts, up to a comfortable maximum; text shrinks only when a name is too wide.
     protected override void Relayout()
     {
         PlaceRight(ColumnWidth);
         if (_today is not { } today) return;
         _rows.Children.Clear();
-        RowHeight = Math.Floor(Math.Clamp((ScreenHeight - Top - 6) / (today.Periods.Length + 1), 18, MaxRow));
+        RowHeight = Math.Floor(Math.Clamp((ScreenHeight - Top - 6) / (today.Lessons.Length + 1), 18, MaxRow));
         // Fixed sizes; only a row too short for both lines, or a name too long for the column, scales them down.
         var fit = Math.Min(1, (RowHeight - 10) / ((NameSize + TimeSize) * 1.33));
         var header = Text($"{today.Date.Month}/{today.Date.Day} {today.Date.DayOfWeek}", HeaderSize * fit, "#1F2937", FontWeight.Bold);
         header.TextWrapping = TextWrapping.NoWrap;
         Add(new Viewbox { StretchDirection = StretchDirection.DownOnly, Child = header,
             HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center }, null);
-        var names = today.Periods.Select(id => Text(Names.GetValueOrDefault(id, id), NameSize * fit, "#1F2937", FontWeight.SemiBold)).ToArray();
+        var names = today.Lessons.Select(lesson => Text(lesson.Name, NameSize * fit, "#1F2937", FontWeight.SemiBold)).ToArray();
         var widest = names.Max(name => { name.TextWrapping = TextWrapping.NoWrap; name.Measure(Size.Infinity); return name.DesiredSize.Width; });
         var nameSize = NameSize * fit * Math.Min(1, (ColumnWidth - 6 - 28) / widest);
-        var times = Times(today.Periods, today.Date.DayOfWeek);
         for (var i = 0; i < names.Length; i++)
         {
             names[i].FontSize = nameSize;
-            var clock = Text($"{times[i].Start:H:mm}–{times[i].End:H:mm}", TimeSize * fit, "#64748B", FontWeight.Medium);
-            names[i].HorizontalAlignment = clock.HorizontalAlignment = HorizontalAlignment.Center;
-            Add(new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { names[i], clock } }, today.Periods[i] == "lunch" ? Lunch : null);
+            names[i].HorizontalAlignment = HorizontalAlignment.Center;
+            var lesson = today.Lessons[i];
+            var row = new StackPanel { VerticalAlignment = VerticalAlignment.Center, Children = { names[i] } };
+            // A row with no bell shows only its name.
+            if (lesson is { Start: { } start, End: { } end })
+            {
+                var clock = Text($"{start:H:mm}–{end:H:mm}", TimeSize * fit, "#64748B", FontWeight.Medium);
+                clock.HorizontalAlignment = HorizontalAlignment.Center;
+                row.Children.Add(clock);
+            }
+            Add(row, lesson.Rest ? Lunch : null);
         }
 
         // Each row is centered: a lesson's name with its time beneath it, or the date header.

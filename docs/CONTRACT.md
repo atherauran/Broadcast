@@ -21,7 +21,7 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `unbind_device` | `p_classroom` | empty; admin |
 | `set_screen_hidden` | `p_classroom`, `p_hidden` | empty; admin. Sets `classrooms.screen_hidden` (see Hidden desktop) |
 | `set_schedule_hidden` | `p_classroom`, `p_hidden` | empty; admin, with the same permission as `set_screen_hidden`. Sets `classrooms.schedule_hidden` (see Hidden desktop) |
-| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule, birthdays}`; current device. `display`, `schedule` and `birthdays` are the same as in `display_state` |
+| `device_heartbeat` | `p_connected` | `{active, classroom_id, server_now, display, schedule, catalog, birthdays}`; current device. `display`, `schedule`, `catalog` and `birthdays` are the same as in `display_state` |
 | `pending_broadcasts` | none | `{server_now, items}`; only this device's current class, not started and not expired |
 | `start_delivery` | `p_delivery` | boolean; the server atomically checks the binding, the 30-second validity and that it hasn't started |
 | `ack_delivery` | `p_delivery`, `p_event`, `p_at`, nullable `p_error` | empty; this device's receipt, safe to retry |
@@ -33,7 +33,10 @@ Endpoint: `POST /functions/v1/broadcast-api`, with `Authorization: Bearer <acces
 | `save_board_draft` | `p_id`, `p_content`, `p_classrooms`, `p_teacher_name`, nullable `p_ends_at`, nullable `p_publish_at` | empty; admin. Saves a board draft, or schedules it when `p_publish_at` is set (see Board drafts) |
 | `delete_board_draft` | `p_id` | empty; admin. Deletes a draft or a scheduled board that has not appeared yet |
 | `display_overview` | none | `{server_now, items}`: every live or scheduled item in all classes; admin |
-| `display_state` | none | `{server_now, items, schedule, birthdays}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, its class's week (see Schedules) or null, and its class's birthday list or null |
+| `display_state` | none | `{server_now, items, schedule, catalog, birthdays}`: this device's class items with `id`, `kind`, `content`, `starts_at`, `ends_at`, `teacher_name`, its class's week (see Schedules) or null, the subject names and lesson times to draw it with (`catalog`, null when `schedule` is hidden), and its class's birthday list or null |
+| `add_subject` | `p_label`, `p_rest` (default false) | the new subject's id; admin. Adds a subject to the shared list (see Schedules) |
+| `delete_subject` | `p_id` | empty; admin. Deletes a custom subject no class's timetable uses |
+| `set_lesson_bells` | `p_days` | empty; admin. Replaces the grade's lesson times (see Schedules) |
 | `set_schedule` | `p_classroom`, `p_days`, `p_teacher_name`, nullable `p_duties` | empty; admin. Replaces the class's week, and its duty roster unless `p_duties` is null |
 | `set_birthdays` | `p_classroom`, `p_students`, `p_teacher_name` | empty; admin. Replaces the class's birthday list (see Birthdays) |
 
@@ -64,7 +67,11 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 `update_display_items` changes live items in place, so the device keeps them by id. Timed countdowns keep the 12-hour limit.
 
-`schedules` holds one row per class: `classroom_id`, `days`, `duties`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, from `english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
+`schedules` holds one row per class: `classroom_id`, `days`, `duties`, `teacher_name`, `updated_by` and `updated_at`. `days` is an array of five arrays (Monday to Friday) of up to 12 subject ids each, every one in `subjects`. Admins read every row and devices only their class's; writes go through `set_schedule`. The device shows the list for its local weekday down the right edge of the screen below the day counts, in a desktop window like notes, and nothing on weekends or on an empty day.
+
+`subjects` is one list shared by every class: `id`, `label`, `rest` and `builtin`, read by any signed-in user and written only by `add_subject` and `delete_subject`. The 14 built-in subjects (`english`, `chinese`, `math`, `physics`, `biology`, `chemistry`, `history`, `pe`, `morality`, `art`, `it`, `elective`, `club` and `lunch`) cannot be changed or deleted. A custom subject's `id` and `label` are its name (1–12 characters, unique ignoring case against every id and label), so an app that ignores `catalog` still shows the name. A `rest` subject (lunch) takes no lesson number.
+
+`lesson_bells` holds the grade's one row of lesson times: `days`, five arrays (Monday to Friday) of up to 12 `HH:mm-HH:mm` strings, each starting before it ends and no earlier than the previous one's end. The k-th row of a class's day that is not a `rest` subject takes bell k; a `rest` row spans from the end of the lesson before it to the start of the one after it, and a row without a bell or without a lesson on both sides has no time. `catalog` in `display_state` and `device_heartbeat` is `{subjects, bells}`: an object of `{label, rest}` by subject id, and `days`. The device draws names and times from it.
 
 `duties` is an array of up to 8 `{task, days}`: task 1–10 characters and `days` five name strings (Monday first, at most 40 characters, `''` for nobody). On a weekday by Asia/Shanghai time, `display_state` and `device_heartbeat` put one synthetic note first in the items: id `md5(classroom ‖ date)`, `content` `{text, color: 'green', duty: true}` with one `task：names` line per job that has names that day, `teacher_name` `今日值日`, `starts_at` 2000-01-01 (so the device, which orders notes by start, puts it first) and `ends_at` the next midnight. It is not a `display_items` row, so it never counts toward the note limit or appears in `display_overview`.
 
@@ -96,7 +103,7 @@ Every item starts when it is created (`starts_at` is the server time), unless `p
 
 ## Realtime and presence
 
-The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`, `board_drafts`, `schedules` and `birthdays`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items`, `schedules` and `birthdays` changes and `classrooms` UPDATEs without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
+The teacher app subscribes to Postgres Changes on `devices`, `classrooms` and `deliveries`. The teacher app also subscribes to `display_items`, `board_drafts`, `schedules`, `subjects`, `lesson_bells` and `birthdays`. The classroom app subscribes to `deliveries` INSERTs over Supabase's Phoenix v1 JSON protocol, filtered by `device_id=eq.<UID>`, and RLS then checks the current class. It also subscribes to all `display_items`, `schedules`, `subjects`, `lesson_bells` and `birthdays` changes and `classrooms` UPDATEs without a filter, which RLS limits to its class; such a change triggers one `display_state` query. WebSocket messages only trigger a query for valid deliveries; they never bypass the database's validity and binding checks.
 
 After the subscription succeeds, the classroom starts reporting heartbeats: every 20 seconds it sends a Phoenix keepalive over the WebSocket and waits for the ack (Supabase requires one at least every 25 seconds; it does no database work). Every 120 seconds it also reports the device heartbeat, whose response carries the display state, and the server marks a classroom offline after 270 seconds without a valid heartbeat. Reconnects back off to about 10 seconds and, once restored, query for unexpired messages. Every 40 seconds a healthy connection also re-queries valid deliveries, so a single lost notification is not missed.
 

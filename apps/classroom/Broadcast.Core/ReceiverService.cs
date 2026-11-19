@@ -38,7 +38,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
                         var state = await backend.RpcAsync<Heartbeat>("device_heartbeat", new { p_connected = true }, token);
                         clock.Sync(state.ServerNow);
                         if (!state.Active) throw new BindingRevokedException();
-                        if (state.Display is not null) await display.UpdateAsync(state.Display, state.Schedule, state.Birthdays, token);
+                        if (state.Display is not null) await display.UpdateAsync(state.Display, state.Schedule, state.Birthdays, token, state.Catalog);
                         attempt = 0;
                         StatusChanged?.Invoke(state.ClassroomId + " · 在线");
                     }, life.Token, SignalFiles, bazaar.Signal);
@@ -106,7 +106,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
         }
     }
 
-    // Only a display_items or schedules change fetches display state; the periodic check rides on the status heartbeat.
+    // Only a display_items, schedules, subjects or lesson_bells change fetches display state; the periodic check rides on the status heartbeat.
     private async Task DisplayLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -116,7 +116,7 @@ public sealed class ReceiverService(BackendClient backend, DeliveryQueue queue, 
             {
                 var state = await backend.RpcAsync<DisplayBatch>("display_state", new { }, ct);
                 clock.Sync(state.ServerNow);
-                await display.UpdateAsync(state.Items, state.Schedule, state.Birthdays, ct);
+                await display.UpdateAsync(state.Items, state.Schedule, state.Birthdays, ct, state.Catalog);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (Exception e) { Report(e); }

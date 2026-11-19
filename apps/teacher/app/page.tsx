@@ -4,11 +4,11 @@ import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, FileUp, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { adminEmail, claimHomeroom, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getOverview, getSchedules, homeroomEmail, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
+import { adminEmail, claimHomeroom, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getBells, getOverview, getSchedules, getSubjects, homeroomEmail, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
 import type { FileTransfer } from '@/lib/files';
-import { CLASSROOM_IDS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, localInput, muted, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
+import { CLASSROOM_IDS, DEFAULT_BELLS, SUBJECTS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, localInput, muted, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
-  type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Schedule, type Timetable } from '@/lib/domain';
+  type BirthdayList, type Feedback, type FeedbackKind, type FeedbackStatus, type SavedBoard, type Bells, type Schedule, type Subject, type Timetable } from '@/lib/domain';
 import { Login } from './login';
 import { Compose } from './compose/compose';
 import { blankBoard, initialDrafts, type Drafts, type Patch } from './compose/drafts';
@@ -16,6 +16,7 @@ import { History, Receipts, broadcastMeta, time } from './history';
 import { OnScreen } from './on-screen';
 import { Devices } from './devices';
 import { BirthdayEditor, type BirthdayRow } from './birthdays';
+import { BellEditor } from './bells';
 import { ScheduleEditor } from './schedule';
 import { FeedbackDialog, FeedbackNews } from './feedback';
 import { Files } from './files';
@@ -52,6 +53,8 @@ export default function App() {
   const [overview, setOverview] = useState<DisplayItem[]>([]);
   const [boardDrafts, setBoardDrafts] = useState<BoardDraftRow[]>([]);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>(SUBJECTS);
+  const [bells, setBells] = useState<Bells>(DEFAULT_BELLS);
   const [birthdays, setBirthdays] = useState<BirthdayList[]>([]);
   const [birthdayDrafts, setBirthdayDrafts] = useState<Record<string, BirthdayRow[]>>({});
   const [weekDrafts, setWeekDrafts] = useState<Record<string, Timetable>>({});
@@ -144,8 +147,8 @@ export default function App() {
     const load = async () => {
       try {
         await refreshRooms();
-        const [items, weeks, saved, lists, tickets] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), getFeedback(), refreshOverview(), refreshFiles()]);
-        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setBoardDrafts(saved); setBirthdays(lists); setFeedback(tickets); }
+        const [items, weeks, saved, lists, tickets, list, times] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), getFeedback(), getSubjects(), getBells(), refreshOverview(), refreshFiles()]);
+        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setSubjects(list); setBells(times); setBoardDrafts(saved); setBirthdays(lists); setFeedback(tickets); }
       } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
     };
     const channel = supabase.channel('teacher-status')
@@ -166,6 +169,8 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'schedules' }, payload => {
         if (payload.eventType !== 'DELETE') setSchedules(old => patchSchedule(old, payload.new as Schedule));
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'subjects' }, () => { void getSubjects().then(setSubjects).catch(e => setError(message(e))); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'lesson_bells' }, () => { void getBells().then(setBells).catch(e => setError(message(e))); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'birthdays' }, payload => {
         if (payload.eventType !== 'DELETE') setBirthdays(old => patchBirthdays(old, payload.new as BirthdayList));
       })
@@ -296,7 +301,7 @@ export default function App() {
   function submit() {
     const c = drafts.countdown;
     const fullscreen = kind === 'alert' || (kind === 'countdown' && c.mode !== 'days' && c.fullscreen);
-    if (fullscreen && inLesson(now)) setConfirmLesson(true); else send();
+    if (fullscreen && inLesson(now, bells)) setConfirmLesson(true); else send();
   }
   function send() {
     void run('send', async () => {
@@ -480,7 +485,8 @@ export default function App() {
         })} />}
       {tab === 'class' && <>
         <section className="section">
-          <div className="section-heading"><h1>班务</h1></div>
+          <div className="section-heading"><h1>班务</h1>
+            <BellEditor bells={bells} ready={ready} busy={busy} onSave={days => run('bells', async () => { await rpc('set_lesson_bells', { p_days: days }); setBells(days); })} /></div>
           <div className="choice-row schedule-classes" aria-label="班级">
             {classIds.map(id => <button type="button" key={id} className={id === adminClassroom ? 'active' : ''} aria-pressed={id === adminClassroom}
               onClick={() => { setClassroom(id); localStorage.setItem('broadcast-schedule-class', id); }}>{id}</button>)}
@@ -493,7 +499,13 @@ export default function App() {
           </div>
         </section>
         {classLocked && <div className="feedback info">只有 {adminClassroom} 班主任{classRoom.homeroom && ` ${classRoom.homeroom.teacher_name}`} 可以修改本班课表、值日和生日</div>}
-        {adminClassroom && classSection === 'schedule' && <ScheduleEditor classroom={adminClassroom} schedules={schedules} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready && !classLocked} busy={busy} onError={setError}
+        {adminClassroom && classSection === 'schedule' && <ScheduleEditor classroom={adminClassroom} schedules={schedules} subjects={subjects}
+          onAddSubject={async (label, rest) => {
+            let id = '';
+            await run('subject', async () => { id = await rpc<string>('add_subject', { p_label: label, p_rest: rest }); setSubjects(old => [...old, { id, label: id, rest, builtin: false }]); });
+            return id;
+          }}
+          onDeleteSubject={id => run('subject', async () => { await rpc('delete_subject', { p_id: id }); setSubjects(old => old.filter(subject => subject.id !== id)); })} drafts={weekDrafts} setDrafts={setWeekDrafts} now={now} ready={ready && !classLocked} busy={busy} onError={setError}
           onSave={(classroom, { days, duties }) => run('schedule', async () => {
             await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
             setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));

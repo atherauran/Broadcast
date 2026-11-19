@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inLesson, lessonTimes, daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validAlert, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
+import { DEFAULT_BELLS, bellsError, inLesson, shiftBells, daysUntil, pastedBirthdays, pastedLines, patchDelivery, patchDisplayItems, patchRoom, TEMPLATES, countdownError, endOfDay, localInput, endError, publishError, nextAt, savedBoards, shiftDays, remaining, soonTime, todayAt, validBanner, validBoard, validNote, deliveryStatus, fillTemplate, isOnline, templateBlanks, validAlert, validTeacherName, type Broadcast, type Classroom, type Delivery, type DisplayItem } from '../lib/domain';
 const now = Date.parse('2026-09-08T10:00:00Z');
 const room: Classroom = { id: '8-1', device_id: 'one', device_name: 'PC', connected: true, last_seen_at: new Date(now - 269_999).toISOString() };
 const d: Delivery = { id: 'one', classroom_id: '8-1', device_id: 'device', online_at_send: true, received_at: null, started_at: null, displayed_at: null, playback_started_at: null, played_at: null, finished_at: null, audio_error: null };
@@ -109,10 +109,20 @@ describe('pasted birthdays', () => {
 });
 describe('class time', () => {
   const at = (day: number, hours: number, minutes: number) => new Date(2026, 9, day, hours, minutes).getTime();
-  it('counts the fixed lesson times on school days, with Wednesday ending 5 minutes earlier', () => {
-    expect(lessonTimes(3).at(-1)).toBe('16:15-16:55');
-    expect(lessonTimes(1).at(-1)).toBe('16:20-17:00');
-    expect([inLesson(at(21, 8, 30)), inLesson(at(21, 9, 9)), inLesson(at(21, 9, 10)), inLesson(at(21, 12, 0)), inLesson(at(21, 16, 54))]).toEqual([true, true, false, false, true]);
-    expect([inLesson(at(21, 16, 55)), inLesson(at(22, 16, 55)), inLesson(at(22, 17, 0)), inLesson(at(24, 9, 30))]).toEqual([false, true, false, false]);
+  it('counts the grade\'s lesson times on school days, with a ninth lesson only on Wednesday', () => {
+    expect(DEFAULT_BELLS[2].at(-1)).toBe('16:15-16:55');
+    expect(DEFAULT_BELLS[0].at(-1)).toBe('15:25-16:05');
+    expect(DEFAULT_BELLS.map(day => day.length)).toEqual([8, 8, 9, 8, 8]);
+    const check = (time: number) => inLesson(time, DEFAULT_BELLS);
+    expect([check(at(21, 8, 30)), check(at(21, 9, 9)), check(at(21, 9, 10)), check(at(21, 12, 0)), check(at(21, 16, 54))]).toEqual([true, true, false, false, true]);
+    expect([check(at(21, 16, 55)), check(at(22, 16, 4)), check(at(22, 16, 20)), check(at(24, 9, 30))]).toEqual([false, true, false, false]);
+    expect(inLesson(at(21, 8, 30), [['09:00-09:40'], [], [], [], []])).toBe(false);
+  });
+  it('moves later lessons with a changed start and rejects overlapping or reversed times', () => {
+    expect(shiftBells(['08:30-09:10', '09:25-10:05', '10:20-11:00'], 1, '09:35')).toEqual(['08:30-09:10', '09:35-10:15', '10:30-11:10']);
+    expect(shiftBells(['23:00-23:40', '23:50-23:59'], 0, '23:30')).toBe(false);
+    expect(bellsError(DEFAULT_BELLS)).toBe(false);
+    expect(bellsError([['09:00-08:00'], [], [], [], []])).toBe(true);
+    expect(bellsError([['08:30-09:10', '09:00-09:40'], [], [], [], []])).toBe(true);
   });
 });

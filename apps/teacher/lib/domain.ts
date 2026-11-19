@@ -265,13 +265,14 @@ export function remaining(ms: number): string {
   return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
-export const SUBJECTS = [
-  { id: 'english', label: '英语 English' }, { id: 'chinese', label: '语文 Chinese' }, { id: 'math', label: '数学 Math' },
-  { id: 'physics', label: '物理 Physics' }, { id: 'biology', label: '生物 Biology' }, { id: 'chemistry', label: '化学 Chemistry' },
-  { id: 'history', label: '历史 History' }, { id: 'pe', label: '体育 PE' }, { id: 'morality', label: '道德与法治' },
-  { id: 'art', label: '艺术 Art/Music' }, { id: 'it', label: '信息科技 IT' }, { id: 'elective', label: '选修 Optional' }, { id: 'club', label: '社团 Club' },
-  { id: 'lunch', label: '午餐 Lunch' },
-] as const;
+// A subject in the shared list; a rest subject (lunch, a long break) takes no lesson number.
+export interface Subject { id: string; label: string; rest: boolean; builtin: boolean }
+// What the list holds before the server's arrives, and always: the built-in subjects can neither be renamed nor deleted.
+export const SUBJECTS: Subject[] = [
+  ['english', '英语 English'], ['chinese', '语文 Chinese'], ['math', '数学 Math'], ['physics', '物理 Physics'], ['biology', '生物 Biology'],
+  ['chemistry', '化学 Chemistry'], ['history', '历史 History'], ['pe', '体育 PE'], ['morality', '道德与法治'], ['art', '艺术 Art/Music'],
+  ['it', '信息科技 IT'], ['elective', '选修 Optional'], ['club', '社团 Club'], ['lunch', '午餐 Lunch'],
+].map(([id, label]) => ({ id, label, rest: id === 'lunch', builtin: true }));
 export const SCHOOL_DAYS = ['周一', '周二', '周三', '周四', '周五'];
 export const DAY_PERIODS = 12;
 // Monday to Friday, each an ordered list of subject ids.
@@ -287,13 +288,26 @@ export function patchSchedule(schedules: Schedule[], row: Schedule): Schedule[] 
   const { classroom_id, days, duties, teacher_name, updated_at } = row;
   return [...schedules.filter(item => item.classroom_id !== classroom_id), { classroom_id, days, duties, teacher_name, updated_at }];
 }
-// Lesson times on school days as "HH:mm-HH:mm", matching the bell times the classroom shows; Wednesday's last break is 10 minutes.
+// The grade's lesson times: for Monday to Friday, "HH:mm-HH:mm" of lesson 1, 2, 3 and so on. Rest rows are not counted.
+export type Bells = string[][];
 const LESSONS = ['08:30-09:10', '09:25-10:05', '10:20-11:00', '11:15-11:50', '12:40-13:20', '13:35-14:15', '14:30-15:10', '15:25-16:05'];
-export const lessonTimes = (day: number) => [...LESSONS, day === 3 ? '16:15-16:55' : '16:20-17:00'];
-export function inLesson(now: number): boolean {
+// Before the server's bells arrive: eight lessons a day, and on Wednesday a ninth after a 10-minute break.
+export const DEFAULT_BELLS: Bells = [1, 2, 3, 4, 5].map(day => day === 3 ? [...LESSONS, '16:15-16:55'] : [...LESSONS]);
+export const BELL_LIMIT = 12;
+export function inLesson(now: number, bells: Bells): boolean {
   const date = new Date(now);
   const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  return date.getDay() >= 1 && date.getDay() <= 5 && lessonTimes(date.getDay()).some(range => time >= range.slice(0, 5) && time < range.slice(6));
+  return date.getDay() >= 1 && date.getDay() <= 5 && (bells[date.getDay() - 1] ?? []).some(range => time >= range.slice(0, 5) && time < range.slice(6));
+}
+// A bell day is valid when each lesson ends after it starts and the next starts no earlier.
+export const bellsError = (bells: Bells): boolean => bells.some(day => day.some((range, at) => range.slice(0, 5) >= range.slice(6) || (at > 0 && range.slice(0, 5) < day[at - 1].slice(6))));
+const minutes = (time: string) => +time.slice(0, 2) * 60 + +time.slice(3);
+const clock = (total: number) => `${pad(Math.floor(total / 60))}:${pad(total % 60)}`;
+// Moving a lesson's start moves it and every later lesson that day by the same amount; false when that would leave the day.
+export function shiftBells(day: string[], at: number, start: string): string[] | false {
+  const delta = minutes(start) - minutes(day[at].slice(0, 5));
+  const moved = day.map((range, index) => index < at ? [minutes(range.slice(0, 5)), minutes(range.slice(6))] : [minutes(range.slice(0, 5)) + delta, minutes(range.slice(6)) + delta]);
+  return moved.every(([from, to]) => from >= 0 && to < 1440) && moved.map(([from, to]) => `${clock(from)}-${clock(to)}`);
 }
 // Jobs as saved: trimmed, and blank rows dropped.
 export const dutyRows = (duties: Duty[]): Duty[] => duties.map(duty => ({ task: duty.task.trim(), days: duty.days.map(name => name.trim()) }))

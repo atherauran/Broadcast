@@ -24,6 +24,7 @@ var tests = new (string Name, Func<Task> Run)[]
     ("Display items appear and end on the server clock, countdowns linger", DisplaySchedule),
     ("Unchanged display state is not re-applied, removal is", DisplayDiff),
     ("The schedule shows the local weekday's lessons, Monday to Friday", ScheduleDays),
+    ("Lessons take the grade's bells in order, and a rest row the gap between them", ScheduleTimes),
     ("Birthdays are greeted on the day, and weekend ones on Friday", BirthdayDays),
     ("Display payloads keep long notes, font sizes and board order", DisplayPayload),
     ("Files save without overwriting and survive receipt loss and restart", FileDownloads),
@@ -404,21 +405,39 @@ static async Task BirthdayDays()
     clock.Sync(At(2026, 10, 16)); await state.UpdateAsync([], null, list, default);
     Check(screen.Applied.Count == 2 && screen.Birthdays.Count == 3, "Birthdays did not move to the next day");
 }
+static Task ScheduleTimes()
+{
+    var catalog = new Catalog(new() { ["english"] = new("英语 English"), ["math"] = new("数学 Math"), ["lunch"] = new("午餐 Lunch", true), ["午休"] = new("午休", true) },
+        [["08:30-09:10", "09:25-10:05", "10:20-11:00"], ["08:00-08:45"], [], [], []]);
+    static string Clock(Lesson lesson) => lesson.Start is { } start && lesson.End is { } end ? $"{start:HH:mm}-{end:HH:mm}" : "";
+    var monday = DisplayState.Lessons(["english", "lunch", "math", "午休", "english", "math"], catalog, DayOfWeek.Monday);
+    Check(monday.Select(l => l.Name).SequenceEqual(["英语 English", "午餐 Lunch", "数学 Math", "午休", "英语 English", "数学 Math"]), "Subject names not resolved");
+    Check(monday.Select(Clock).SequenceEqual(["08:30-09:10", "09:10-09:25", "09:25-10:05", "10:05-10:20", "10:20-11:00", ""]), "Lesson times wrong: " + string.Join(" ", monday.Select(Clock)));
+    Check(monday[1].Rest && !monday[0].Rest, "Rest flag not carried");
+    Check(DisplayState.Lessons(["lunch", "math"], catalog, DayOfWeek.Monday).Select(Clock).SequenceEqual(["", "08:30-09:10"]), "A rest row without a lesson before it was timed");
+    Check(DisplayState.Lessons(["math", "lunch"], catalog, DayOfWeek.Monday).Select(Clock).SequenceEqual(["08:30-09:10", ""]), "A rest row without a lesson after it was timed");
+    Check(DisplayState.Lessons(["math", "math"], catalog, DayOfWeek.Tuesday).Select(Clock).SequenceEqual(["08:00-08:45", ""]), "Day with fewer bells than lessons");
+    Check(DisplayState.Lessons(["math"], catalog, DayOfWeek.Wednesday).Select(Clock).SequenceEqual([""]), "Day with no bells");
+    Check(DisplayState.Lessons(["实验课"], null, DayOfWeek.Monday).Single() is { Name: "实验课", Start: null }, "Without a catalog a subject shows its id and no time");
+    Check(JsonSerializer.Deserialize<Heartbeat>("{\"active\":true,\"server_now\":\"2026-10-12T01:00:00Z\",\"catalog\":{\"subjects\":{\"math\":{\"label\":\"数学 Math\",\"rest\":false}},\"bells\":[[\"08:30-09:10\"],[],[],[],[]]}}", Json.Options)
+        is { Catalog.Bells.Length: 5 } beat && beat.Catalog.Subjects["math"].Label == "数学 Math", "Catalog JSON not read");
+    return Task.CompletedTask;
+}
 static async Task ScheduleDays()
 {
     string[][] week = [["english", "lunch"], ["math"], [], ["art"], ["club"]];
     DateTimeOffset At(int day) => new(new DateTime(2026, 10, day, 9, 0, 0, DateTimeKind.Local));
-    Check(DisplayState.Today(week, At(12)) is { Periods: ["english", "lunch"] } monday && monday.Date == new DateOnly(2026, 10, 12), "Monday");
-    Check(DisplayState.Today(week, At(16))?.Periods.Single() == "club", "Friday");
-    Check(DisplayState.Today(week, At(14)) is null && DisplayState.Today(week, At(17)) is null && DisplayState.Today(week, At(18)) is null, "Empty day or weekend shown");
-    Check(DisplayState.Today(null, At(12)) is null, "Missing schedule shown");
+    Check(DisplayState.Today(week, null, At(12)) is { Lessons: [{ Name: "english" }, { Name: "lunch" }] } monday && monday.Date == new DateOnly(2026, 10, 12), "Monday");
+    Check(DisplayState.Today(week, null, At(16))?.Lessons.Single().Name == "club", "Friday");
+    Check(DisplayState.Today(week, null, At(14)) is null && DisplayState.Today(week, null, At(17)) is null && DisplayState.Today(week, null, At(18)) is null, "Empty day or weekend shown");
+    Check(DisplayState.Today(null, null, At(12)) is null, "Missing schedule shown");
     var clock = new ServerClock(); var screen = new FakeScreen();
     var state = new DisplayState(screen, clock);
     clock.Sync(At(12)); await state.UpdateAsync([], week, null, default);
-    Check(screen.Today?.Periods.Length == 2, "Schedule not applied");
+    Check(screen.Today?.Lessons.Length == 2, "Schedule not applied");
     await state.UpdateAsync([], week, null, default); Check(screen.Applied.Count == 1, "Same schedule applied twice");
     clock.Sync(At(13)); await state.UpdateAsync([], week, null, default);
-    Check(screen.Applied.Count == 2 && screen.Today?.Periods.Single() == "math", "Schedule did not move to the next day");
+    Check(screen.Applied.Count == 2 && screen.Today?.Lessons.Single().Name == "math", "Schedule did not move to the next day");
     clock.Sync(At(17)); await state.UpdateAsync([], week, null, default); Check(screen.Today is null, "Weekend still shows a schedule");
 }
 

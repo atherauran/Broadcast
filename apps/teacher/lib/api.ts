@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import type { BirthdayList, BoardDraftRow, Broadcast, Classroom, DisplayItem, Feedback, Schedule } from './domain';
+import type { Bells, BirthdayList, BoardDraftRow, Broadcast, Classroom, DisplayItem, Feedback, Schedule, Subject } from './domain';
 import { fileError, type FileTransfer } from './files';
 export const configured = !!(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY);
 export const supabase = configured ? createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY) : null;
@@ -47,6 +47,18 @@ export async function getSchedules(): Promise<Schedule[]> {
   const { data, error } = await supabase.from('schedules').select('classroom_id, days, duties, teacher_name, updated_at');
   if (error) throw new Error(error.message);
   return data;
+}
+export async function getSubjects(): Promise<Subject[]> {
+  if (!supabase) throw new Error('广播服务尚未配置');
+  const { data, error } = await supabase.from('subjects').select('id, label, rest, builtin').order('n');
+  if (error) throw new Error(error.message);
+  return data;
+}
+export async function getBells(): Promise<Bells> {
+  if (!supabase) throw new Error('广播服务尚未配置');
+  const { data, error } = await supabase.from('lesson_bells').select('days').single();
+  if (error) throw new Error(error.message);
+  return data.days;
 }
 export async function getBirthdays(): Promise<BirthdayList[]> {
   if (!supabase) throw new Error('广播服务尚未配置');
