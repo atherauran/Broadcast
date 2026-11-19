@@ -32,7 +32,7 @@ export function HomeroomPanel({ room, now, ready, busy, onHide, onHideSchedule, 
           {room.schedule_hidden ? '显示课表' : '隐藏课表'}</Button>
       </div>
       <div className="homeroom-control">
-        <div><strong>其他老师的广播</strong><p className={status ? 'paused' : 'muted'}>{status || '正常接收'}</p></div>
+        <div><strong>其他老师广播</strong><p className={status ? 'paused' : 'muted'}>{status || '正常接收'}</p></div>
         {status
           ? <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => void onMute(null, null)}>解除暂停</Button>
           : <Button variant="outline" className="action" disabled={!ready || !!busy} onClick={() => setPausing(true)}>暂停接收</Button>}
