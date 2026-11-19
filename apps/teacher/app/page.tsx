@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import { ArrowUpRight, AudioLines, Cake, CalendarDays, Clock3, FileUp, LogOut, MessageSquareText, MonitorPlay, Radio, Settings2, WifiOff, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { adminEmail, claimHomeroom, configured, getBirthdays, getBoardDrafts, getClassrooms, getFeedback, getFileHistory, getHistory, getBells, getOverview, getSchedules, getSubjects, homeroomEmail, maintainerEmail, once, rpc, sendFile, supabase } from '@/lib/api';
+import { serverNow, setTickRate, syncClock, useNow } from '@/lib/clock';
 import type { FileTransfer } from '@/lib/files';
 import { CLASSROOM_IDS, DEFAULT_BELLS, SUBJECTS, TEST_CLASSROOM, boardEntries, inLesson, endOfDay, localInput, muted, patchBirthdays, patchBoardDrafts, patchDelivery, patchDisplayItems, patchRoom, patchSchedule, savedBoards,
   todayAt, validTeacherName, type BoardDraftRow, type Broadcast, type Classroom, type DeliveryRow, type DisplayItem, type DisplayRow, type Kind,
@@ -23,6 +24,8 @@ import { Files } from './files';
 import { ClaimPrompt, HomeroomPanel } from './homeroom';
 
 const emptyRooms: Classroom[] = CLASSROOM_IDS.map(id => ({ id, device_id: null, device_name: null, connected: false, last_seen_at: null }));
+// Re-renders only its own subtree on each clock tick, so the rest of the page does not.
+function Clocked({ children }: { children: (now: number) => ReactNode }) { return <>{children(useNow())}</>; }
 const message = (error: unknown) => error instanceof Error ? error.message : '操作未完成，请重试';
 const teacherKey = 'broadcast-teacher-session-v2';
 const rememberedTeacher = () => localStorage.getItem(teacherKey)?.trim() || '';
@@ -77,9 +80,7 @@ export default function App() {
   const [confirmLesson, setConfirmLesson] = useState(false);
   const [live, setLive] = useState(false);
   const [network, setNetwork] = useState(navigator.onLine);
-  const [now, setNow] = useState(Date.now);
-  // Server time is the local clock until the first response calibrates it.
-  const clock = useRef({ server: 0, local: 0 });
+  const [slow, setSlow] = useState(false);
   const historyRef = useRef(history);
   const sw = useRegisterSW();
   const userId = session?.user.id;
@@ -102,33 +103,23 @@ export default function App() {
     const { data } = supabase.auth.onAuthStateChange((_event, current) => { setSession(current); setAuthReady(true); if (!current) setLive(false); });
     return () => { mounted = false; data.subscription.unsubscribe(); };
   }, []);
-  const serverNow = () => clock.current.server + performance.now() - clock.current.local;
   useEffect(() => {
-    clock.current = { server: Date.now(), local: performance.now() };
     const online = () => setNetwork(true);
     const offline = () => { setNetwork(false); setLive(false); };
     window.addEventListener('online', online); window.addEventListener('offline', offline);
     return () => { window.removeEventListener('online', online); window.removeEventListener('offline', offline); };
   }, []);
-  // Only the on-screen tab shows a countdown, so only it needs a per-second render.
-  useEffect(() => {
-    const timer = window.setInterval(() => { if (!document.hidden) setNow(serverNow()); }, tab === 'screen' ? 1000 : 5000);
-    return () => clearInterval(timer);
-  }, [tab]);
+  useEffect(() => { setTickRate(tab === 'screen' ? 1000 : 5000); }, [tab]);
   useEffect(() => { historyRef.current = history; }, [history]);
   const mergeHistory = useCallback((items: Broadcast[]) => setHistory(old => {
     const all = new Map(old.map(item => [item.id, item]));
     items.forEach(item => all.set(item.id, item));
     return [...all.values()].sort((a, b) => b.created_at.localeCompare(a.created_at));
   }), []);
-  const sync = useCallback((server: string) => {
-    clock.current = { server: Date.parse(server), local: performance.now() };
-    setNow(clock.current.server);
-  }, []);
   const refreshRooms = useCallback(async () => {
     const result = await getClassrooms();
-    sync(result.server_now); setRooms(result.classrooms);
-  }, [sync]);
+    syncClock(result.server_now); setRooms(result.classrooms);
+  }, []);
   const refreshFeedback = useCallback(async () => setFeedback(await getFeedback()), []);
   const refreshFiles = useCallback(async (id: string | null = null) => {
     const items = await getFileHistory(null, id);
@@ -137,20 +128,26 @@ export default function App() {
   }, []);
   const refreshOverview = useCallback(async () => {
     const result = await getOverview();
-    sync(result.server_now); setOverview(result.items);
-  }, [sync]);
+    syncClock(result.server_now); setOverview(result.items);
+  }, []);
   useEffect(() => {
     if (!userId || !supabase || !network) return;
     let disposed = false;
     // Deliveries of a broadcast this page has not loaded yet wait here while its history is fetched once.
     const loading = new Map<string, DeliveryRow[]>();
-    const load = async () => {
+    const apply = <T,>(request: Promise<T>, set: (value: T) => void) => request.then(value => { if (!disposed) set(value); });
+    // `full` fetches everything; otherwise only what other devices change by the second (status, history, screen, files).
+    // Resolves to whether it succeeded.
+    const load = async (full = true) => {
       try {
-        await refreshRooms();
-        const [items, weeks, saved, lists, tickets, list, times] = await Promise.all([getHistory(), getSchedules(), getBoardDrafts(), getBirthdays(), getFeedback(), getSubjects(), getBells(), refreshOverview(), refreshFiles()]);
-        if (!disposed) { mergeHistory(items); setHasMore(items.length === 20); setSchedules(weeks); setSubjects(list); setBells(times); setBoardDrafts(saved); setBirthdays(lists); setFeedback(tickets); }
-      } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } }
+        const jobs: Promise<unknown>[] = [refreshRooms(), refreshFiles(), refreshOverview(), apply(getHistory(), items => { mergeHistory(items); setHasMore(items.length === 20); })];
+        if (full) jobs.push(apply(getSchedules(), setSchedules), apply(getBoardDrafts(), setBoardDrafts), apply(getBirthdays(), setBirthdays), apply(getFeedback(), setFeedback), apply(getSubjects(), setSubjects), apply(getBells(), setBells));
+        await Promise.all(jobs);
+        return true;
+      } catch (e) { if (!disposed) { setError(message(e)); setLive(false); } return false; }
     };
+    let firstFetch = true;
+    const first = load();
     const channel = supabase.channel('teacher-status')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'file_transfers' }, payload => { void refreshFiles((payload.new as { id: string }).id).catch(e => setError(message(e))); })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'file_deliveries' }, payload => { void refreshFiles((payload.new as { transfer_id: string }).transfer_id).catch(e => setError(message(e))); })
@@ -193,7 +190,12 @@ export default function App() {
       .subscribe(status => {
         if (disposed) return;
         setLive(status === 'SUBSCRIBED');
-        if (status === 'SUBSCRIBED') void load();
+        if (status !== 'SUBSCRIBED') return;
+        if (!firstFetch) { void load(); return; }
+        firstFetch = false;
+        // The first fetch started before the socket was ready. Once it lands, refresh only what could have changed meanwhile,
+        // or everything if it failed or is taking too long.
+        void Promise.race([first, new Promise<boolean>(done => setTimeout(done, 8000, false))]).then(ok => { if (!disposed) void load(!ok); });
       });
     // A brief switch away keeps the socket alive and misses nothing; a longer one may have lost events, so reload then.
     let hiddenAt = 0;
@@ -254,7 +256,7 @@ export default function App() {
   });
   async function sendBroadcast(input: Record<string, unknown>) {
     const classrooms = [...selected].sort();
-    const paused = rooms.filter(room => classrooms.includes(room.id) && muted(room, now) && !room.own).map(room => room.id);
+    const paused = rooms.filter(room => classrooms.includes(room.id) && muted(room, serverNow()) && !room.own).map(room => room.id);
     const id = await once('broadcast-attempt', [input, classrooms, sender], id =>
       rpc<string>('create_broadcast', { p_id: id, p_classrooms: classrooms, p_teacher_name: sender, ...input }));
     setLatestId(id);
@@ -269,7 +271,7 @@ export default function App() {
   // Saving under the same id replaces the earlier draft or schedule; without publishAt it stays a draft.
   async function saveBoard(publishAt: string) {
     const b = drafts.board;
-    const start = publishAt ? Date.parse(publishAt) : now;
+    const start = publishAt ? Date.parse(publishAt) : serverNow();
     await rpc('save_board_draft', { p_id: b.draftId ?? crypto.randomUUID(), p_content: boardContent(), p_classrooms: [...selected].sort(),
       p_teacher_name: sender, p_ends_at: publishAt || b.endAt ? endsAt(b.endAt, start) : null, p_publish_at: publishAt ? new Date(start).toISOString() : null });
     if (!live) await Promise.all([getBoardDrafts().then(setBoardDrafts), refreshOverview()]);
@@ -301,7 +303,7 @@ export default function App() {
   function submit() {
     const c = drafts.countdown;
     const fullscreen = kind === 'alert' || (kind === 'countdown' && c.mode !== 'days' && c.fullscreen);
-    if (fullscreen && inLesson(now, bells)) setConfirmLesson(true); else send();
+    if (fullscreen && inLesson(serverNow(), bells)) setConfirmLesson(true); else send();
   }
   function send() {
     void run('send', async () => {
@@ -318,14 +320,14 @@ export default function App() {
         const b = drafts.board;
         if (b.publishAt) await saveBoard(b.publishAt);
         else {
-          await createDisplay('board', boardContent(), { p_ends_at: endsAt(b.endAt, now) });
+          await createDisplay('board', boardContent(), { p_ends_at: endsAt(b.endAt, serverNow()) });
           // Published from a saved board, which is no longer needed.
           if (b.draftId) await rpc('delete_board_draft', { p_id: b.draftId });
         }
         patch('board', blankBoard());
       } else if (kind === 'note') {
         const n = drafts.note;
-        const start = n.publishAt ? Date.parse(n.publishAt) : now;
+        const start = n.publishAt ? Date.parse(n.publishAt) : serverNow();
         await createDisplay('note', { text: n.text.trim(), color: n.color, font_size: n.fontSize },
           { p_ends_at: endsAt(n.endAt, start), p_starts_at: n.publishAt ? new Date(start).toISOString() : null });
         // An end set for a scheduled day does not carry over to the next note.
@@ -334,7 +336,7 @@ export default function App() {
         const c = drafts.countdown;
         if (c.mode === 'days') await createDisplay('countdown', { label: c.label.trim(), fullscreen: false, date: c.date }, { p_ends_at: new Date(`${c.date}T23:59:59`).toISOString() });
         else await createDisplay('countdown', { label: c.label.trim(), fullscreen: c.fullscreen }, c.mode === 'until'
-          ? { p_ends_at: new Date(todayAt(now, c.until)).toISOString() } : { p_duration_seconds: c.minutes * 60 });
+          ? { p_ends_at: new Date(todayAt(serverNow(), c.until)).toISOString() } : { p_duration_seconds: c.minutes * 60 });
         patch('countdown', { label: '' });
       }
       setSignAs(null);
@@ -380,6 +382,12 @@ export default function App() {
   }
 
   const known = configured && !!session && live && network;
+  // A normal connect takes a moment; only warn once it is clearly slow, so the page does not jump.
+  useEffect(() => {
+    if (known || !userId) return;
+    const timer = window.setTimeout(() => setSlow(true), 2000);
+    return () => { clearTimeout(timer); setSlow(false); };
+  }, [known, userId]);
   const ready = configured && !!session && network && validTeacherName(teacherName);
   // The test class, and what was sent only there, exist for the maintainer alone.
   const shown = (id: string) => maintainer || id !== TEST_CLASSROOM;
@@ -424,7 +432,7 @@ export default function App() {
         <button className={tab === 'class' ? 'active' : ''} onClick={() => setTab('class')}><CalendarDays size={18} />班务</button>
       </nav>
       {!configured && <div className="feedback config-notice"><span className="tiny-dot" />广播服务尚未配置，连接后即可使用。</div>}
-      {configured && !known && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
+      {configured && !known && (!network || slow) && <output className="feedback warning"><WifiOff size={17} />{network ? '正在连接，设备状态待确认' : '网络已断开，草稿已保留'}</output>}
       {error && <div className="feedback error" role="alert">{error}<button aria-label="关闭提示" onClick={() => setError('')}><X size={17} /></button></div>}
       {notice && <div className="feedback info">{notice}<button aria-label="关闭提示" onClick={() => setNotice('')}><X size={17} /></button></div>}
       {showClaim && <ClaimPrompt classroom={homeroom.classroom_id} claimed={homeroom.claimed} busy={busy}
@@ -432,14 +440,14 @@ export default function App() {
         onClaim={password => run('claim', () => claimHomeroom(homeroom.classroom_id, password))} />}
       {sw.needRefresh[0] && <div className="feedback info">有新版本可用<Button variant="link" onClick={() => void sw.updateServiceWorker(true)} disabled={!!busy}>更新应用</Button></div>}
       {tab === 'send' && <>
-        {myRoom && <HomeroomPanel room={myRoom} now={now} ready={ready} busy={busy} onHide={hidden => hideScreen(myRoom, hidden)} onHideSchedule={hidden => hideSchedule(myRoom, hidden)}
+        {myRoom && <Clocked>{now => <HomeroomPanel room={myRoom} now={now} ready={ready} busy={busy} onHide={hidden => hideScreen(myRoom, hidden)} onHideSchedule={hidden => hideSchedule(myRoom, hidden)}
           onMute={(from, until) => run('mute', async () => {
             await rpc('set_broadcast_mute', { p_classroom: myRoom.id, p_from: from, p_until: until });
             await refreshRooms();
-          })} />}
-        <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
+          })} />}</Clocked>}
+        <Clocked>{now => <Compose kind={kind} setKind={setKind} rooms={visibleRooms} known={known} now={now} selected={selected} setSelected={setSelected}
           drafts={drafts} patch={patch} ready={ready} busy={busy} onSubmit={submit} onError={setError}
-          saved={savedBoards(visibleDrafts, visibleOverview, now)} teacherName={teacherName} signAs={signAs ?? teacherName} setSignAs={setSignAs} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />
+          saved={savedBoards(visibleDrafts, visibleOverview, now)} teacherName={teacherName} signAs={signAs ?? teacherName} setSignAs={setSignAs} onSaveDraft={saveDraft} onOpenSaved={openSaved} onDeleteSaved={deleteSaved} />}</Clocked>
         <AlertDialog open={confirmLesson} onOpenChange={setConfirmLesson}>
           <AlertDialogContent className="confirm-card">
             <AlertDialogTitle>现在是上课时间，可能影响当前的课堂进程，您确认要发布吗？</AlertDialogTitle>
@@ -453,14 +461,14 @@ export default function App() {
           <div className="section-heading"><h2>本次广播 · {latest.teacher_name}</h2><span className="muted">{time(latest.created_at)}</span></div>
           <p className="broadcast-body">{latest.body}</p>
           <p className="broadcast-meta">{broadcastMeta(latest)}</p>
-          <Receipts item={latest} rooms={visibleRooms} known={known} now={now} />
+          <Clocked>{now => <Receipts item={latest} rooms={visibleRooms} known={known} now={now} />}</Clocked>
         </section>}
         {!latest && visibleHistory.length > 0 && <button className="recent-link" onClick={() => { setTab('history'); setExpanded(visibleHistory[0].id); }}>
           <span><span className="muted">最近广播 · {time(visibleHistory[0].created_at)}</span><span className="recent-body">{visibleHistory[0].body}</span></span>
           <ArrowUpRight size={20} />
         </button>}
       </>}
-      {tab === 'screen' && <OnScreen items={visibleOverview} rooms={visibleRooms} classes={classIds} known={known} now={now} ready={ready} busy={busy}
+      {tab === 'screen' && <Clocked>{now => <OnScreen items={visibleOverview} rooms={visibleRooms} classes={classIds} known={known} now={now} ready={ready} busy={busy}
         onRemove={ids => run('remove', async () => { await rpc('remove_display_items', { p_ids: ids }); if (!live) await refreshOverview(); })}
         onEdit={(ids, content, ends) => run('edit', async () => {
           await rpc('update_display_items', { p_ids: ids, p_content: content, p_ends_at: ends }); if (!live) await refreshOverview();
@@ -469,11 +477,11 @@ export default function App() {
           await once('copy-attempt', [ids, classrooms, teacherName], id =>
             rpc('copy_display_items', { p_request: id, p_ids: ids, p_classrooms: classrooms, p_teacher_name: teacherName }));
           if (!live) await refreshOverview();
-        })} onError={setError} />}
-      {tab === 'history' && <History history={visibleHistory} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
+        })} onError={setError} />}</Clocked>}
+      {tab === 'history' && <Clocked>{now => <History history={visibleHistory} expanded={expanded} setExpanded={setExpanded} hasMore={hasMore} canLoad={!busy && ready}
         onLoadMore={() => void run('history', async () => { const items = await getHistory(history.at(-1)!.created_at); mergeHistory(items); setHasMore(items.length === 20); })}
-        onResend={resend} rooms={visibleRooms} known={known} now={now} configured={configured} />}
-      {tab === 'files' && <Files rooms={visibleRooms} known={known} now={now} ready={ready} busy={busy} onError={setError}
+        onResend={resend} rooms={visibleRooms} known={known} now={now} configured={configured} />}</Clocked>}
+      {tab === 'files' && <Clocked>{now => <Files rooms={visibleRooms} known={known} now={now} ready={ready} busy={busy} onError={setError}
         history={fileHistory.map(item => ({ ...item, deliveries: item.deliveries.filter(d => shown(d.classroom_id)) })).filter(item => item.deliveries.length)}
         hasMore={moreFiles} onMore={() => void run('file-history', async () => {
           const items = await getFileHistory(fileHistory.at(-1)!.created_at);
@@ -482,7 +490,7 @@ export default function App() {
         onSend={(file, classrooms) => run('files', async () => {
           const id = await sendFile(file, classrooms, teacherName);
           void refreshFiles(id).catch(e => setError(message(e)));
-        })} />}
+        })} />}</Clocked>}
       {tab === 'class' && <>
         <section className="section">
           <div className="section-heading"><h1>班务</h1>
@@ -499,7 +507,7 @@ export default function App() {
           </div>
         </section>
         {classLocked && <div className="feedback info">只有 {adminClassroom} 班主任{classRoom.homeroom && ` ${classRoom.homeroom.teacher_name}`} 可以修改本班课表、值日和生日</div>}
-        {adminClassroom && classSection === 'schedule' && <ScheduleEditor classroom={adminClassroom} schedules={schedules} subjects={subjects}
+        {adminClassroom && classSection === 'schedule' && <Clocked>{now => <ScheduleEditor classroom={adminClassroom} schedules={schedules} subjects={subjects}
           onAddSubject={async (label, rest) => {
             let id = '';
             await run('subject', async () => { id = await rpc<string>('add_subject', { p_label: label, p_rest: rest }); setSubjects(old => [...old, { id, label: id, rest, builtin: false }]); });
@@ -509,16 +517,16 @@ export default function App() {
           onSave={(classroom, { days, duties }) => run('schedule', async () => {
             await rpc('set_schedule', { p_classroom: classroom, p_days: days, p_duties: duties, p_teacher_name: teacherName });
             setSchedules(old => patchSchedule(old, { classroom_id: classroom, days, duties, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
-          })} />}
-        {adminClassroom && classSection === 'birthdays' && <BirthdayEditor classroom={adminClassroom} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready && !classLocked} busy={busy}
+          })} />}</Clocked>}
+        {adminClassroom && classSection === 'birthdays' && <Clocked>{now => <BirthdayEditor classroom={adminClassroom} lists={birthdays} drafts={birthdayDrafts} setDrafts={setBirthdayDrafts} now={now} ready={ready && !classLocked} busy={busy}
           onError={setError} onSave={(classroom, students) => run('birthdays', async () => {
             await rpc('set_birthdays', { p_classroom: classroom, p_students: students, p_teacher_name: teacherName });
             setBirthdays(old => patchBirthdays(old, { classroom_id: classroom, students, teacher_name: teacherName, updated_at: new Date(now).toISOString() }));
-          })} />}
+          })} />}</Clocked>}
       </>}
-      {tab === 'devices' && <Devices rooms={visibleRooms} now={now} ready={ready} busy={busy} onBack={() => setTab('send')} onHideSchedule={hideSchedule}
+      {tab === 'devices' && <Clocked>{now => <Devices rooms={visibleRooms} now={now} ready={ready} busy={busy} onBack={() => setTab('send')} onHideSchedule={hideSchedule}
         onUnbind={room => run('unbind', async () => { await rpc('unbind_device', { p_classroom: room.id }); if (!live) await refreshRooms(); })}
-        onHide={hideScreen} />}
+        onHide={hideScreen} />}</Clocked>}
     </main>
     {feedbackOpen && <FeedbackDialog items={feedback ?? []} maintainer={maintainer} focus={feedbackOpen.focus} onClose={closeFeedback}
       onSubmit={submitFeedback} onComment={commentFeedback} onStatus={setFeedbackStatus} />}
